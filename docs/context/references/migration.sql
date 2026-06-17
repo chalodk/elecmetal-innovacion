@@ -1,1 +1,0 @@
-../../../migrations/001_initial.sql
