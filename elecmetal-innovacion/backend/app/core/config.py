@@ -5,10 +5,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # Supabase / DB
-    database_url: str
+    database_url: str = ""       # Optional: direct Pg (IPv6); we use Management API
     supabase_url: str
     supabase_jwt_secret: str = ""
     supabase_service_role_key: str = ""
+    supabase_access_token: str = ""   # Management API bridge token
+    supabase_project_ref: str = ""    # Management API project ref
 
     # OpenAI
     openai_api_key: str = ""
