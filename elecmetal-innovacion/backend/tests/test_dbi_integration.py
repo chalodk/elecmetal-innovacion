@@ -17,7 +17,7 @@ import pytest
 # Ensure backend is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services.dbi_parser import parse_dbi, DBIParseError
+from app.services.dbi_parser import DBIParseError
 from app.services.dbi_persistence import persist_initiative, detect_dbi_in_message
 
 FIXTURES = Path(__file__).parent / "fixtures" / "dbi"

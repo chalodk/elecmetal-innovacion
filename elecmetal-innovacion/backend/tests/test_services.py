@@ -8,7 +8,6 @@ Tests:
   - Evaluator context building
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -17,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.services.dbi_parser import (
-    parse_dbi, DBIParseError, _clean, _parse_level,
+    DBIParseError, _clean, _parse_level,
     _parse_economic_impact, _parse_uncertainty, _parse_key_condition,
     _parse_months, _parse_list, _split_fields, SENTINELS,
 )
@@ -356,11 +355,12 @@ class TestPagination:
         assert validate_cursor("") is None
         assert validate_cursor("42") == 42
         assert validate_cursor("1") == 1
-        with pytest.raises(ValueError):
+        from app.core.errors import AppError
+        with pytest.raises(AppError):
             validate_cursor("abc")
-        with pytest.raises(ValueError):
+        with pytest.raises(AppError):
             validate_cursor("0")
-        with pytest.raises(ValueError):
+        with pytest.raises(AppError):
             validate_cursor("-5")
 
     def test_validate_limit(self):

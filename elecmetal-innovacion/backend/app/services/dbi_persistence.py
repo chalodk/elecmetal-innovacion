@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 
 from app.core.database import get_pool
-from app.services.dbi_parser import DBIParseError, parse_dbi
+from app.services.dbi_parser import parse_dbi
 
 logger = logging.getLogger(__name__)
 
