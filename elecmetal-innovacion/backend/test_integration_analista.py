@@ -9,7 +9,6 @@ Tests:
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -92,15 +91,17 @@ async def test_list_sessions_by_agent():
             await conn.execute(f"DELETE FROM sessions WHERE id = {c_row['id']}")
             await conn.execute(f"DELETE FROM messages WHERE session_id = {a_row['id']}")
             await conn.execute(f"DELETE FROM sessions WHERE id = {a_row['id']}")
-            print(f"     [CLEAN] Removed both test sessions")
+            print("     [CLEAN] Removed both test sessions")
 
 
 async def test_analista_service_loads():
-    """Step 11.3: AnalistaService loads prompt v2 correctly."""
+    """Step 11.3: AnalistaService loads prompt v2 from skill file (lazy init)."""
     print("\n--- Test: AnalistaService prompt loading ---")
 
     try:
         service = AnalistaService()
+        # System prompt is lazy-loaded; ensure it before asserting
+        await service._ensure_system_prompt()
         prompt = service._system_prompt
 
         # Verify key sections from prompt v2
@@ -114,11 +115,11 @@ async def test_analista_service_loads():
 
         print(f"  [PASS] Prompt loaded: {len(prompt)} chars")
         print(f"     States A-L present: {'A — INGESTA' in prompt}")
-        print(f"     Output labels: DATO/SUPUESTO/DERIVADO present")
+        print("     Output labels: DATO/SUPUESTO/DERIVADO present")
 
     except RuntimeError as e:
         if "OPENAI_API_KEY" in str(e):
-            print(f"  [SKIP] No OpenAI key configured — service init skipped")
+            print("  [SKIP] No OpenAI key configured — service init skipped")
         else:
             raise
 
@@ -189,7 +190,7 @@ async def test_analista_chat_flow():
             assert "DERIVADO" in msgs[1]["content"]
 
             print(f"  [PASS] {len(msgs)} messages persisted")
-            print(f"     Assistant response labels: DATO/SUPUESTO/DERIVADO present")
+            print("     Assistant response labels: DATO/SUPUESTO/DERIVADO present")
 
         finally:
             await conn.execute(f"DELETE FROM messages WHERE session_id = {session_id}")
@@ -234,7 +235,7 @@ async def test_agent_type_validation():
             print("  [WARN] Invalid agent_type was accepted — CHECK constraint missing")
         except Exception as e:
             assert "violates" in str(e).lower() or "check" in str(e).lower()
-            print(f"  [PASS] Invalid agent_type rejected by DB constraint")
+            print("  [PASS] Invalid agent_type rejected by DB constraint")
 
 
 async def main():

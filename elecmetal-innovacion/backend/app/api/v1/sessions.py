@@ -235,6 +235,70 @@ async def get_messages(
     )
 
 
+# ── GET /{id}/stream ────────────────────────────────────────────────────────
+
+@router.get("/{session_id}/stream")
+async def stream_session(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+    resume_from: int | None = Query(None, ge=0, description="Tokens ya recibidos por el frontend"),
+):
+    """SSE stream de la respuesta del agente. Soporta reconexion via ?resume_from=."""
+    user_id = require_user_id(user)
+    sid = require_bigint_id(session_id, "session_id")
+    skip_tokens = resume_from or 0
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        # Verify session exists and belongs to user
+        session_row = await conn.fetchrow(
+            f"SELECT id, agent_type FROM sessions "
+            f"WHERE id = {sid} AND user_id = '{user_id}'"
+        )
+        if not session_row:
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Sesion no encontrada",
+            )
+
+        agent_type = session_row["agent_type"]
+
+        # Find the placeholder assistant message (most recent assistant with empty content)
+        placeholder = await conn.fetchrow(
+            f"SELECT id FROM messages "
+            f"WHERE session_id = {sid} AND role = 'assistant' "
+            f"ORDER BY created_at DESC LIMIT 1"
+        )
+
+        if not placeholder:
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="No hay mensaje assistant placeholder — llama POST /messages primero",
+            )
+
+        placeholder_msg_id = placeholder["id"]
+
+        rows = await conn.fetch(
+            f"SELECT role, content FROM messages "
+            f"WHERE session_id = {sid} "
+            f"ORDER BY created_at ASC"
+        )
+
+    history = [{"role": r["role"], "content": r["content"]} for r in rows]
+
+    generator = _stream_agent_response(
+        str(sid), user_id, history, agent_type,
+        placeholder_message_id=placeholder_msg_id,
+        resume_from=skip_tokens,
+    )
+
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
 # ── POST /{id}/messages ─────────────────────────────────────────────────────
 
 SSE_HEADERS = {
@@ -244,19 +308,17 @@ SSE_HEADERS = {
 }
 
 
-async def _persist_assistant_message(
-    session_id: str, content: str
-) -> int:
-    """Inserta el mensaje del asistente en la BD y devuelve su ID."""
+async def _update_assistant_message(
+    message_id: int, content: str
+) -> None:
+    """Actualiza el mensaje assistant placeholder con el contenido final."""
     pool = get_pool()
     async with pool.acquire() as conn:
         escaped = content.replace("'", "''")
-        row = await conn.fetchrow(
-            f"INSERT INTO messages (session_id, role, content) "
-            f"VALUES ({session_id}, 'assistant', '{escaped}') "
-            f"RETURNING id"
+        await conn.execute(
+            f"UPDATE messages SET content = '{escaped}' "
+            f"WHERE id = {message_id}"
         )
-    return row["id"]
 
 
 async def _stream_agent_response(
@@ -264,9 +326,18 @@ async def _stream_agent_response(
     user_id: str,
     history: list[dict],
     agent_type: str,
+    placeholder_message_id: int,
+    resume_from: int = 0,
 ) -> AsyncGenerator[str, None]:
-    """SSE generator: stream agent tokens, persist response, detect DBI (Clara only)."""
+    """SSE generator: stream agent tokens, update placeholder, detect DBI (Clara only).
+
+    Args:
+        resume_from: Cantidad de tokens ya recibidos por el frontend.
+                     Los primeros resume_from tokens se acumulan pero no se emiten.
+        placeholder_message_id: ID del mensaje assistant placeholder a actualizar.
+    """
     full_response: list[str] = []
+    chunks_yielded: int = 0
 
     if agent_type == "analista_oportunidad":
         service = analista_service
@@ -274,7 +345,9 @@ async def _stream_agent_response(
         service = clara_service
 
     if service is None:
-        async for chunk in _stream_placeholder(session_id):
+        async for chunk in _stream_placeholder(
+            session_id, placeholder_message_id, resume_from
+        ):
             yield chunk
         return
 
@@ -284,8 +357,8 @@ async def _stream_agent_response(
 
             if line == "data: [DONE]":
                 content = "".join(full_response)
-                asst_msg_id = await _persist_assistant_message(
-                    session_id, content
+                await _update_assistant_message(
+                    placeholder_message_id, content
                 )
 
                 # ── DBI detection (Clara only) ─────────────────────────
@@ -314,7 +387,7 @@ async def _stream_agent_response(
                         logger.exception("DBI persistence failed")
                         initiative_info = {"persistence_error": str(pe_exc)}
 
-                done_payload: dict = {"done": True, "message_id": asst_msg_id}
+                done_payload: dict = {"done": True, "message_id": placeholder_message_id}
                 if initiative_info:
                     done_payload["initiative"] = initiative_info
                 yield f"data: {json.dumps(done_payload)}\n\n"
@@ -324,9 +397,11 @@ async def _stream_agent_response(
                     payload = json.loads(payload_str)
                     if "token" in payload:
                         full_response.append(payload["token"])
+                        chunks_yielded += 1
+                        if chunks_yielded > resume_from:
+                            yield chunk
                 except (json.JSONDecodeError, KeyError):
                     pass
-                yield chunk
 
     except Exception as exc:
         logger.exception("Error streaming agent response")
@@ -335,19 +410,26 @@ async def _stream_agent_response(
 
 async def _stream_placeholder(
     session_id: str,
+    placeholder_message_id: int,
+    resume_from: int = 0,
 ) -> AsyncGenerator[str, None]:
-    """SSE fallback when Clara is unavailable."""
+    """SSE fallback when agent service is unavailable. Supports resume_from."""
     PLACEHOLDER = (
         "Clara no esta disponible en este momento. "
         "Intentaremos conectarla pronto."
     )
     words = PLACEHOLDER.split(" ")
+    chunks_yielded = 0
+
     for i, word in enumerate(words):
         token = word + (" " if i < len(words) - 1 else "")
-        yield f"data: {json.dumps({'token': token})}\n\n"
+        chunks_yielded += 1
+        if chunks_yielded > resume_from:
+            yield f"data: {json.dumps({'token': token})}\n\n"
 
-    asst_msg_id = await _persist_assistant_message(session_id, PLACEHOLDER)
-    yield f"data: {json.dumps({'done': True, 'message_id': asst_msg_id})}\n\n"
+    await _update_assistant_message(placeholder_message_id, PLACEHOLDER)
+    done_payload = {"done": True, "message_id": placeholder_message_id}
+    yield f"data: {json.dumps(done_payload)}\n\n"
 
 
 @router.post("/{session_id}/messages", status_code=status.HTTP_201_CREATED)
@@ -356,7 +438,11 @@ async def send_message(
     body: SendMessageRequest,
     user: dict = Depends(get_current_user),
 ):
-    """Envia un mensaje en una sesion y streamea la respuesta de Clara via SSE."""
+    """Persiste el mensaje del usuario y crea placeholder para el assistant.
+
+    Retorna JSON con ambos mensajes. El frontend luego abre GET /stream
+    para recibir los tokens del agente via SSE.
+    """
     user_id = require_user_id(user)
     sid = require_bigint_id(session_id, "session_id")
 
@@ -372,26 +458,23 @@ async def send_message(
                 message="Sesion no encontrada",
             )
 
-        agent_type = session_row["agent_type"]
-
+        # Persist user message
         escaped_content = body.content.replace("'", "''")
-        await conn.execute(
+        user_row = await conn.fetchrow(
             f"INSERT INTO messages (session_id, role, content) "
-            f"VALUES ({sid}, 'user', '{escaped_content}')"
+            f"VALUES ({sid}, 'user', '{escaped_content}') "
+            f"RETURNING id, session_id, role, content, created_at"
         )
 
-        rows = await conn.fetch(
-            f"SELECT role, content FROM messages "
-            f"WHERE session_id = {sid} "
-            f"ORDER BY created_at ASC"
+        # Create placeholder assistant message (empty content, filled by GET /stream)
+        asst_row = await conn.fetchrow(
+            f"INSERT INTO messages (session_id, role, content) "
+            f"VALUES ({sid}, 'assistant', '') "
+            f"RETURNING id, session_id, role, content, created_at"
         )
 
-    history = [{"role": r["role"], "content": r["content"]} for r in rows]
-
-    generator = _stream_agent_response(str(sid), user_id, history, agent_type)
-
-    return StreamingResponse(
-        generator,
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
+    return {
+        "user_message": dict(user_row),
+        "assistant_message": dict(asst_row),
+        "session_id": sid,
+    }
