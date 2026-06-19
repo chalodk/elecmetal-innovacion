@@ -6,7 +6,6 @@ which works on IPv4 networks.
 
 Credentials are read from environment variables via app.core.config.Settings.
 """
-import os
 from typing import Any, Optional
 
 import httpx

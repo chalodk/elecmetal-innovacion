@@ -7,6 +7,8 @@ Uses cursor-based (keyset) pagination for stable, efficient iteration.
 import re
 from typing import Any
 
+from app.core.errors import AppError, ErrorCode
+
 _BIGINT_RE = re.compile(r"^[0-9]{1,19}$")
 
 DEFAULT_LIMIT = 20
@@ -17,7 +19,7 @@ def validate_cursor(cursor: str | None) -> int | None:
     """Validate and parse a cursor value for BIGINT-primary-key pagination.
 
     Returns the cursor as int, or None if invalid/missing.
-    Raises ValueError if the cursor format is invalid.
+    Raises AppError if the cursor format is invalid.
     """
     if cursor is None:
         return None
@@ -25,10 +27,18 @@ def validate_cursor(cursor: str | None) -> int | None:
     if not c:
         return None
     if not _BIGINT_RE.match(c):
-        raise ValueError(f"Cursor invalido: '{cursor}' (debe ser un entero positivo)")
+        raise AppError(
+            code=ErrorCode.INVALID_ID,
+            message=f"Cursor invalido: '{cursor}' (debe ser un entero positivo)",
+            details={"field": "cursor", "value": cursor},
+        )
     val = int(c)
     if val <= 0:
-        raise ValueError(f"Cursor invalido: {cursor} (debe ser > 0)")
+        raise AppError(
+            code=ErrorCode.INVALID_ID,
+            message=f"Cursor invalido: {cursor} (debe ser > 0)",
+            details={"field": "cursor", "value": cursor},
+        )
     return val
 
 
