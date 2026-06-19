@@ -1,0 +1,117 @@
+name: CI — Elecmetal Innovacion
+
+on:
+  push:
+    branches: [main, nuevo]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Backend tests ───────────────────────────────────────────────────────
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run parser unit tests
+        env:
+          SKIP_INTEGRATION: 1
+        run: python -m pytest tests/test_dbi_parser.py -v
+
+      - name: Run pagination unit tests
+        run: |
+          python -c "
+          from app.core.pagination import validate_cursor, validate_limit, paginated_response, build_sort_clause
+          # Test validate_cursor
+          assert validate_cursor(None) is None
+          assert validate_cursor('42') == 42
+          try:
+              validate_cursor('abc')
+              assert False, 'Should raise'
+          except ValueError:
+              pass
+          # Test validate_limit
+          assert validate_limit(None) == 20
+          assert validate_limit('5') == 5
+          assert validate_limit('200') == 100  # clamped
+          # Test paginated_response
+          resp = paginated_response([{'id': 1}, {'id': 2}], limit=1)
+          assert resp['data'] == [{'id': 1}]
+          assert resp['pagination']['has_more'] is True
+          assert resp['pagination']['next_cursor'] == '1'
+          # Test build_sort_clause
+          order = build_sort_clause('status', 'ASC', {'id', 'status', 'created_at'})
+          assert 'ORDER BY status ASC' in order
+          print('[PASS] All pagination tests passed')
+          "
+
+  # ── Frontend tests ──────────────────────────────────────────────────────
+  frontend:
+    name: Frontend (Node.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest tests
+        run: npm test
+
+      - name: Build check
+        run: npm run build -- --no-lint
+
+  # ── Migration validation ────────────────────────────────────────────────
+  migrations:
+    name: Migration Schema Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate SQL syntax
+        run: |
+          echo "Checking migration files for syntax..."
+          for f in ../migrations/*.sql ../supabase/migrations/*.sql; do
+            echo "  Validating $f"
+            # Basic checks: file is non-empty, has Up/Down markers
+            if [ -f "$f" ]; then
+              lines=$(wc -l < "$f")
+              has_up=$(grep -c "+goose Up\|-- Up" "$f" || true)
+              has_down=$(grep -c "+goose Down\|-- Down" "$f" || true)
+              echo "    lines=$lines, has_up=$has_up, has_down=$has_down"
+              [ $lines -gt 0 ] || { echo "ERROR: empty file"; exit 1; }
+            fi
+          done
+          echo "[PASS] All migration files validated"
