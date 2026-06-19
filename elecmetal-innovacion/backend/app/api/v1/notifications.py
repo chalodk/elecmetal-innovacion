@@ -1,12 +1,8 @@
-"""Notifications API (Step 8 of the boot sequence).
-
-Endpoints para listar notificaciones y disparar el procesamiento.
-"""
+"""Notifications API — listar y procesar notificaciones."""
 
 import logging
-import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.core.database import get_pool
@@ -15,26 +11,16 @@ from app.core.pagination import (
     validate_limit,
     paginated_response,
 )
-from app.core.security import get_current_user
+from app.core.security import (
+    get_current_user,
+    require_user_id,
+    require_directora,
+)
 from app.services.notification_service import process_pending
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_BIGINT_RE = re.compile(r"^[0-9]{1,19}$")
-_UUID_RE = re.compile(
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-)
-
-
-def _is_valid_bigint(value: str) -> bool:
-    return bool(_BIGINT_RE.match(value))
-
-
-def _is_valid_uuid(value: str) -> bool:
-    return bool(_UUID_RE.fullmatch(value))
 
 
 class ProcessSummary(BaseModel):
@@ -53,11 +39,7 @@ async def list_notifications(
     limit: str | None = Query(None, description=f"Page size (max {100})"),
 ):
     """Lista las notificaciones del usuario autenticado, con paginacion."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin identificador de usuario")
-    if not _is_valid_uuid(user_id):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token con identificador de usuario invalido")
+    user_id = require_user_id(user)
 
     cursor_val = validate_cursor(cursor)
     page_limit = validate_limit(limit)
@@ -97,29 +79,8 @@ async def list_notifications(
 
 @router.post("/process", response_model=ProcessSummary)
 async def trigger_process(user: dict = Depends(get_current_user)):
-    """Dispara el procesamiento de notificaciones pendientes (admin/directora).
-
-    Envia emails via Resend para todas las notificaciones con status='pending'.
-    Solo accesible para usuarios con rol directora o admin.
-    """
-    user_id = user.get("sub")
-    if not user_id or not _is_valid_uuid(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalido",
-        )
-
-    # Verify role
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        profile = await conn.fetchrow(
-            f"SELECT role FROM profiles WHERE id = '{user_id}'"
-        )
-        if not profile or profile["role"] not in ("directora", "admin"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Solo directora o admin pueden procesar notificaciones",
-            )
+    """Dispara el procesamiento de notificaciones pendientes (admin/directora)."""
+    user_id = await require_directora(user)
 
     summary = await process_pending()
     logger.info(

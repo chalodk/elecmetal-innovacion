@@ -25,8 +25,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -167,36 +165,36 @@ def _build_initiative_context(initiative: dict) -> str:
     parts.append(f"Area: {initiative.get('area', 'No especificada')}")
     parts.append(f"Postulante: {initiative.get('applicant_name', 'No especificado')}")
 
-    parts.append(f"\n--- PROBLEMA ---")
+    parts.append("\n--- PROBLEMA ---")
     parts.append(f"Problema: {initiative.get('problem', 'No especificado')}")
 
-    parts.append(f"\n--- SOLUCION ---")
+    parts.append("\n--- SOLUCION ---")
     parts.append(f"Descripcion: {initiative.get('solution', 'No especificado')}")
     parts.append(f"Impacto economico: {initiative.get('economic_impact', 'No especificado')}")
     parts.append(f"TRL: {initiative.get('trl', 'No declarado')}")
     parts.append(f"Escalabilidad: {initiative.get('scalability', 'No especificado')}")
 
-    parts.append(f"\n--- CLIENTE ---")
+    parts.append("\n--- CLIENTE ---")
     parts.append(f"Cliente interno: {initiative.get('internal_client', 'No especificado')}")
     parts.append(f"Cliente externo: {initiative.get('external_client', 'No especificado')}")
     parts.append(f"CRL: {initiative.get('crl', 'No declarado')}")
 
-    parts.append(f"\n--- ALINEAMIENTO ---")
+    parts.append("\n--- ALINEAMIENTO ---")
     parts.append(f"Foco estrategico: {initiative.get('strategic_alignment', 'por asignar')}")
 
-    parts.append(f"\n--- EQUIPO ---")
+    parts.append("\n--- EQUIPO ---")
     parts.append(f"Equipo interno: {initiative.get('internal_team', 'No especificado')}")
     parts.append(f"Equipo externo: {initiative.get('external_team', 'No especificado')}")
     parts.append(f"Sponsor: {initiative.get('sponsor', 'No especificado')}")
     parts.append(f"Duracion estimada: {initiative.get('estimated_duration', 'No estimado')}")
 
-    parts.append(f"\n--- RIESGO ---")
+    parts.append("\n--- RIESGO ---")
     parts.append(f"Duda principal: {initiative.get('main_doubt', 'No especificado')}")
     parts.append(f"Condicion clave: {initiative.get('key_condition', 'No especificado')}")
     parts.append(f"Captura de valor: {initiative.get('value_capture', 'No especificado')}")
     parts.append(f"BRL: {initiative.get('brl', 'No declarado')}")
 
-    parts.append(f"\n--- HITOS ---")
+    parts.append("\n--- HITOS ---")
     parts.append(f"Tecnicos/operativos: {initiative.get('technical_milestones', 'No definido')}")
     parts.append(f"Economicos/financieros: {initiative.get('financial_milestones', 'No definido')}")
     parts.append(f"Horizonte de retorno: {initiative.get('return_horizon', 'No especificado')} meses")
@@ -288,7 +286,7 @@ async def _load_evaluator_prompt() -> str:
             "ORDER BY created_at DESC LIMIT 1"
         )
 
-    db_prompt = row["prompt_text"] if row else ""
+    _db_prompt = row["prompt_text"] if row else ""
     # The DB prompt is a placeholder — use the comprehensive system prompt
     return EVALUATOR_SYSTEM_PROMPT
 

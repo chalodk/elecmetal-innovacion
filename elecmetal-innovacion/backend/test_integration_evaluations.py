@@ -13,7 +13,6 @@ Cleans up after itself.
 
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,8 +22,6 @@ from app.core.database import create_pool, close_pool, get_pool
 from app.services.evaluator import (
     create_evaluation,
     update_evaluation_results,
-    evaluate_initiative,
-    EvaluatorError,
     _build_initiative_context,
 )
 
@@ -205,7 +202,7 @@ async def test_evaluation_lifecycle():
                 f"SELECT status FROM initiatives WHERE id = {init_id}"
             )
             assert updated["status"] == "en_evaluacion"
-            print(f"  [PASS] Initiative -> en_evaluacion")
+            print("  [PASS] Initiative -> en_evaluacion")
 
             # ── 3. Create evaluation record ──────────────────────────
             eval_row = await conn.fetchrow(
@@ -301,7 +298,7 @@ async def test_evaluation_lifecycle():
                 f"SELECT status FROM initiatives WHERE id = {init_id}"
             )
             assert init_check["status"] == "evaluado"
-            print(f"  [PASS] Initiative -> evaluado")
+            print("  [PASS] Initiative -> evaluado")
 
             # ── 5. Review and validate ───────────────────────────────
             await conn.execute(
@@ -328,7 +325,7 @@ async def test_evaluation_lifecycle():
                 f"SELECT status FROM initiatives WHERE id = {init_id}"
             )
             assert final_init["status"] == "validado"
-            print(f"  [PASS] Initiative -> validado")
+            print("  [PASS] Initiative -> validado")
 
             # ── Cleanup ──────────────────────────────────────────
             await conn.execute(f"DELETE FROM evaluations WHERE id = {eval_id}")
@@ -377,7 +374,7 @@ async def test_duplicate_evaluation_prevented():
             except Exception as e:
                 assert "duplicate" in str(e).lower() or "unique" in str(e).lower() or "violates" in str(e).lower(), \
                     f"Unexpected error: {e}"
-                print(f"  [PASS] Duplicate evaluation prevented by DB constraint")
+                print("  [PASS] Duplicate evaluation prevented by DB constraint")
 
             # Cleanup
             await conn.execute(f"DELETE FROM evaluations WHERE initiative_id = {initiative['id']}")
@@ -495,7 +492,7 @@ async def test_update_evaluation_results():
                 f"SELECT status FROM initiatives WHERE id = {initiative['id']}"
             )
             assert init_check["status"] == "validado"
-            print(f"  [PASS] Initiative -> validado after review")
+            print("  [PASS] Initiative -> validado after review")
 
             # Cleanup
             await conn.execute(f"DELETE FROM evaluations WHERE id = {eval_id}")

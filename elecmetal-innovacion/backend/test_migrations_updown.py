@@ -37,7 +37,7 @@ async def test_001_initial_schema():
                      "messages", "notifications", "profiles", "sessions"]
         for t in expected:
             assert t in names, f"Missing table: {t}"
-        checks.append(f"7 tables present")
+        checks.append("7 tables present")
 
         # 2. profiles PK is UUID
         pk = await conn.fetchrow(
@@ -167,7 +167,7 @@ async def test_002_down_would_revert_correctly():
         if outlier_count > 0:
             print(f"  value_capture outliers: {outlier_count} (Down migration will NULL them)")
         else:
-            print(f"  value_capture: all values compatible with old enum")
+            print("  value_capture: all values compatible with old enum")
 
         print("  [PASS] All data compatible with Down migration")
         print("  [PASS] 002 Up/Down logic verified")
@@ -192,10 +192,10 @@ async def test_trigger_fixed():
             "SELECT prosrc FROM pg_proc WHERE proname = 'handle_new_user'"
         )
         # Verify the function body contains the SET search_path
-        has_search_path = "search_path" in src.lower() or (
+        _has_search_path = "search_path" in src.lower() or (
             func["proconfig"] and any("search_path" in str(c) for c in (func["proconfig"] or []))
         )
-        print(f"  Function exists: SECURITY DEFINER")
+        print("  Function exists: SECURITY DEFINER")
         print(f"  search_path fix: {'SET in source' if 'SET search_path' in src else 'proconfig: ' + str(func['proconfig'])}")
 
         # Verify anon CANNOT execute it

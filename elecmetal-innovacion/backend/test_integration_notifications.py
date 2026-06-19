@@ -12,14 +12,11 @@ Cleans up after itself.
 """
 
 import asyncio
-import json
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.services.dbi_parser import parse_dbi
 from app.services.dbi_persistence import persist_initiative
 from app.services.notification_service import (
     create_notifications,
@@ -167,7 +164,7 @@ async def test_email_building():
     notif3 = {"notification_type": "unknown"}
     subject3, body3 = _build_email(notif3)
     assert subject3 == "Notificacion"
-    print(f"  [PASS] Unknown type: fallback subject")
+    print("  [PASS] Unknown type: fallback subject")
 
 
 async def test_initiative_transitions_to_notificado():

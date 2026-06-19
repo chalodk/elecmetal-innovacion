@@ -1,69 +1,29 @@
-"""Evaluations API (Step 9 of the boot sequence).
-
-Endpoints for the evaluation lifecycle:
-  - PATCH /initiatives/{id}/status    → move to en_evaluacion (directora)
-  - POST  /initiatives/{id}/evaluation → activate evaluator (directora)
-  - GET   /evaluations/{id}            → get evaluation details
-  - PATCH /evaluations/{id}            → review, adjust, validate (directora)
-"""
+"""Evaluations API — ciclo de vida de evaluacion de iniciativas."""
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from app.core.database import get_pool
-from app.core.security import get_current_user
+from app.core.errors import AppError, ErrorCode
+from app.core.security import (
+    get_current_user,
+    require_user_id,
+    require_bigint_id,
+    require_directora,
+)
 from app.services.evaluator import (
     create_evaluation,
-    update_evaluation_results,
-    evaluate_initiative,
     EvaluatorError,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_BIGINT_RE = re.compile(r"^[0-9]{1,19}$")
-_UUID_RE = re.compile(
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-)
-
-
-def _is_valid_bigint(value: str) -> bool:
-    return bool(_BIGINT_RE.match(value))
-
-
-def _is_valid_uuid(value: str) -> bool:
-    return bool(_UUID_RE.fullmatch(value))
-
-
-async def _require_directora(user: dict) -> str:
-    """Verify the user has directora/admin role. Returns user_id."""
-    user_id = user.get("sub")
-    if not user_id or not _is_valid_uuid(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalido",
-        )
-
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        profile = await conn.fetchrow(
-            f"SELECT role FROM profiles WHERE id = '{user_id}'"
-        )
-        if not profile or profile["role"] not in ("directora", "admin"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Solo directora o admin pueden realizar esta accion",
-            )
-    return user_id
 
 
 def _eval_to_response(row: dict) -> dict:
@@ -73,7 +33,6 @@ def _eval_to_response(row: dict) -> dict:
         val = result.get(col)
         if val is not None and not isinstance(val, str):
             result[col] = val.isoformat()
-    # Parse results JSONB if string
     if isinstance(result.get("results"), str):
         try:
             result["results"] = json.loads(result["results"])
@@ -105,44 +64,42 @@ async def update_initiative_status(
     user: dict = Depends(get_current_user),
 ):
     """Mueve una iniciativa a 'en_evaluacion'. Solo directora/admin."""
-    user_id = await _require_directora(user)
-
-    if not _is_valid_bigint(initiative_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de iniciativa invalido",
-        )
+    user_id = await require_directora(user)
+    iid = require_bigint_id(initiative_id, "initiative_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
         init = await conn.fetchrow(
-            f"SELECT id, status FROM initiatives WHERE id = {initiative_id}"
+            f"SELECT id, status FROM initiatives WHERE id = {iid}"
         )
         if not init:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Iniciativa no encontrada",
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Iniciativa no encontrada",
             )
 
         if init["status"] != "notificado":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"La iniciativa esta en estado '{init['status']}' — "
-                       f"debe estar en 'notificado' para pasar a evaluacion",
+            raise AppError(
+                code=ErrorCode.STATE_CONFLICT,
+                message=(
+                    f"La iniciativa esta en estado '{init['status']}' — "
+                    f"debe estar en 'notificado' para pasar a evaluacion"
+                ),
+                details={"current_status": init["status"], "required_status": "notificado"},
             )
 
         await conn.execute(
             f"UPDATE initiatives SET status = 'en_evaluacion', updated_at = now() "
-            f"WHERE id = {initiative_id}"
+            f"WHERE id = {iid}"
         )
 
         updated = await conn.fetchrow(
-            f"SELECT id, status, updated_at FROM initiatives WHERE id = {initiative_id}"
+            f"SELECT id, status, updated_at FROM initiatives WHERE id = {iid}"
         )
 
     logger.info(
         "initiative.status_changed initiative_id=%s old=%s new=%s by=%s",
-        initiative_id, init["status"], updated["status"], user_id,
+        iid, init["status"], updated["status"], user_id,
     )
 
     return dict(updated)
@@ -155,36 +112,24 @@ async def trigger_evaluation(
     initiative_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """Activa al Evaluador IA para una iniciativa. Solo directora/admin.
-
-    El Evaluador recibe el DBI completo (campos estructurados + dbi_extra),
-    genera el scorecard (22 items + derivados), y los resultados se guardan
-    en evaluations.results como JSONB.
-
-    La iniciativa pasa a 'evaluado' al completar exitosamente.
-    """
-    user_id = await _require_directora(user)
-
-    if not _is_valid_bigint(initiative_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de iniciativa invalido",
-        )
+    """Activa al Evaluador IA para una iniciativa. Solo directora/admin."""
+    user_id = await require_directora(user)
+    iid = require_bigint_id(initiative_id, "initiative_id")
 
     try:
         evaluation = await create_evaluation(
-            initiative_id=int(initiative_id),
+            initiative_id=iid,
             activated_by=user_id,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e),
+        raise AppError(
+            code=ErrorCode.STATE_CONFLICT,
+            message=str(e),
         )
     except EvaluatorError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"El Evaluador fallo: {e}",
+        raise AppError(
+            code=ErrorCode.EVALUATOR_ERROR,
+            message=f"El Evaluador fallo: {e}",
         )
 
     return _eval_to_response(evaluation)
@@ -198,29 +143,19 @@ async def get_evaluation_by_initiative(
     user: dict = Depends(get_current_user),
 ):
     """Obtiene la evaluacion asociada a una iniciativa (si existe)."""
-    user_id = user.get("sub")
-    if not user_id or not _is_valid_uuid(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalido",
-        )
-
-    if not _is_valid_bigint(initiative_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de iniciativa invalido",
-        )
+    require_user_id(user)
+    iid = require_bigint_id(initiative_id, "initiative_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            f"SELECT * FROM evaluations WHERE initiative_id = {initiative_id}"
+            f"SELECT * FROM evaluations WHERE initiative_id = {iid}"
         )
 
     if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Evaluacion no encontrada para esta iniciativa",
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message="Evaluacion no encontrada para esta iniciativa",
         )
 
     return _eval_to_response(row)
@@ -234,29 +169,19 @@ async def get_evaluation(
     user: dict = Depends(get_current_user),
 ):
     """Obtiene los detalles de una evaluacion, incluyendo resultados."""
-    user_id = user.get("sub")
-    if not user_id or not _is_valid_uuid(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalido",
-        )
-
-    if not _is_valid_bigint(evaluation_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de evaluacion invalido",
-        )
+    require_user_id(user)
+    eid = require_bigint_id(evaluation_id, "evaluation_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            f"SELECT * FROM evaluations WHERE id = {evaluation_id}"
+            f"SELECT * FROM evaluations WHERE id = {eid}"
         )
 
     if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Evaluacion no encontrada",
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message="Evaluacion no encontrada",
         )
 
     return _eval_to_response(row)
@@ -270,39 +195,31 @@ async def review_evaluation(
     body: ReviewEvaluationRequest,
     user: dict = Depends(get_current_user),
 ):
-    """Revisa, ajusta resultados y valida una evaluacion. Solo directora/admin.
-
-    - Si se envian `results`, se actualiza el scorecard con los ajustes.
-    - Si se envia `veredicto`, se registra la decision del comite.
-    - Si `validate=true`, se transiciona la iniciativa a 'validado'.
-    """
-    user_id = await _require_directora(user)
-
-    if not _is_valid_bigint(evaluation_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de evaluacion invalido",
-        )
+    """Revisa, ajusta resultados y valida una evaluacion. Solo directora/admin."""
+    user_id = await require_directora(user)
+    eid = require_bigint_id(evaluation_id, "evaluation_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
         eval_row = await conn.fetchrow(
-            f"SELECT * FROM evaluations WHERE id = {evaluation_id}"
+            f"SELECT * FROM evaluations WHERE id = {eid}"
         )
         if not eval_row:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Evaluacion no encontrada",
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Evaluacion no encontrada",
             )
 
         if eval_row["status"] != "completed":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"La evaluacion esta en estado '{eval_row['status']}' — "
-                       f"debe estar 'completed' para revisar",
+            raise AppError(
+                code=ErrorCode.STATE_CONFLICT,
+                message=(
+                    f"La evaluacion esta en estado '{eval_row['status']}' — "
+                    f"debe estar 'completed' para revisar"
+                ),
+                details={"current_status": eval_row["status"], "required_status": "completed"},
             )
 
-        # Build updates
         updates: list[str] = []
         if body.results is not None:
             results_json = json.dumps(body.results, ensure_ascii=False)
@@ -320,10 +237,9 @@ async def review_evaluation(
             updates.append("updated_at = now()")
             await conn.execute(
                 f"UPDATE evaluations SET {', '.join(updates)} "
-                f"WHERE id = {evaluation_id}"
+                f"WHERE id = {eid}"
             )
 
-        # If validating, transition initiative
         if body.validate:
             init_id = eval_row["initiative_id"]
             await conn.execute(
@@ -332,11 +248,11 @@ async def review_evaluation(
             )
             logger.info(
                 "evaluation.validated evaluation_id=%s initiative_id=%s by=%s",
-                evaluation_id, init_id, user_id,
+                eid, init_id, user_id,
             )
 
         updated = await conn.fetchrow(
-            f"SELECT * FROM evaluations WHERE id = {evaluation_id}"
+            f"SELECT * FROM evaluations WHERE id = {eid}"
         )
 
     return _eval_to_response(updated)

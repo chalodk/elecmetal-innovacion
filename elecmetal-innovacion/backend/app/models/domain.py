@@ -9,7 +9,6 @@ camelCase via its built-in alias generator (or explicit alias where needed).
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from enum import Enum
 from typing import Any
 

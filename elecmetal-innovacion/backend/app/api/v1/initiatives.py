@@ -1,38 +1,22 @@
-"""Initiatives API — listar y obtener iniciativas (paso 7 del boot sequence).
+"""Initiatives API — listar y obtener iniciativas con paginacion y filtros."""
 
-Paso 12: cursor-based pagination, filters, and sorting.
-"""
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 
 from app.core.database import get_pool
+from app.core.errors import AppError, ErrorCode
 from app.core.pagination import (
     validate_cursor,
     validate_limit,
     paginated_response,
     build_sort_clause,
-    DEFAULT_LIMIT,
 )
-from app.core.security import get_current_user
+from app.core.security import (
+    get_current_user,
+    require_user_id,
+    require_bigint_id,
+)
 
 router = APIRouter()
-
-import re
-
-_UUID_RE = (
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-)
-_BIGINT_RE = re.compile(r"^[0-9]{1,19}$")
-
-
-def _is_valid_uuid(value: str) -> bool:
-    return bool(re.fullmatch(_UUID_RE, value))
-
-
-def _is_valid_bigint(value: str) -> bool:
-    return bool(_BIGINT_RE.match(value))
-
 
 _INITIATIVE_SORT_COLUMNS = {
     "id", "created_at", "updated_at", "postulation_date",
@@ -64,11 +48,7 @@ async def list_initiatives(
 
     **Directora/admin** ven todas; **postulante** solo las suyas.
     """
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin identificador de usuario")
-    if not _is_valid_uuid(user_id):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token con identificador de usuario invalido")
+    user_id = require_user_id(user)
 
     cursor_val = validate_cursor(cursor)
     page_limit = validate_limit(limit)
@@ -80,7 +60,6 @@ async def list_initiatives(
         default_dir="DESC",
     )
 
-    # Build WHERE clauses
     conditions: list[str] = []
 
     pool = get_pool()
@@ -134,13 +113,8 @@ async def get_initiative(
     user: dict = Depends(get_current_user),
 ):
     """Obtiene una iniciativa completa por ID, incluyendo DBI completo."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin identificador de usuario")
-    if not _is_valid_uuid(user_id):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token con identificador de usuario invalido")
-    if not _is_valid_bigint(initiative_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de iniciativa invalido")
+    user_id = require_user_id(user)
+    iid = require_bigint_id(initiative_id, "initiative_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -148,11 +122,16 @@ async def get_initiative(
         is_admin = profile and profile["role"] in ("directora", "admin")
 
         if is_admin:
-            row = await conn.fetchrow(f"SELECT * FROM initiatives WHERE id = {initiative_id}")
+            row = await conn.fetchrow(f"SELECT * FROM initiatives WHERE id = {iid}")
         else:
-            row = await conn.fetchrow(f"SELECT * FROM initiatives WHERE id = {initiative_id} AND user_id = '{user_id}'")
+            row = await conn.fetchrow(
+                f"SELECT * FROM initiatives WHERE id = {iid} AND user_id = '{user_id}'"
+            )
 
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Iniciativa no encontrada")
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message="Iniciativa no encontrada",
+        )
 
     return _initiative_from_row(row)
