@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @lru_cache(maxsize=1)
@@ -67,9 +67,14 @@ def decode_supabase_jwt(token: str) -> dict:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict:
     """Dependencia FastAPI: extrae y valida el usuario del token Bearer."""
+    if credentials is None:
+        raise AppError(
+            code=ErrorCode.UNAUTHORIZED,
+            message="Token de autorizacion requerido",
+        )
     return decode_supabase_jwt(credentials.credentials)
 
 

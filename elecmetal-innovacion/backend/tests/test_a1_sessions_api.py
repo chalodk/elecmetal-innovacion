@@ -100,10 +100,10 @@ class TestGetMe:
         """401: no token → error unificado."""
         resp = client.get("/api/v1/me")
 
-        assert resp.status_code == 403  # HTTPBearer returns 403 when no header
+        assert resp.status_code == 401
         body = resp.json()
         assert "error" in body
-        assert body["error"]["code"] == "FORBIDDEN"
+        assert body["error"]["code"] == "UNAUTHORIZED"
 
     @patch("app.core.security._fetch_jwks")
     def test_me_401_invalid_token(self, mock_jwks):
@@ -202,7 +202,7 @@ class TestCreateSession:
     def test_create_session_401_no_token(self):
         """401: sin token."""
         resp = client.post("/api/v1/sessions", json={"agent_type": "clara"})
-        assert resp.status_code == 403  # HTTPBearer 403
+        assert resp.status_code == 401
 
     @patch("app.api.v1.sessions.get_pool")
     def test_create_session_422_empty_body(self, mock_pool):
