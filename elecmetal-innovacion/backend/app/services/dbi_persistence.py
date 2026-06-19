@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 
 from app.core.database import get_pool
 from app.services.dbi_parser import parse_dbi
@@ -145,6 +144,10 @@ async def persist_initiative(
 ) -> dict:
     """Parse DBI text, INSERT into initiatives, transition session → completed.
 
+    Uses persist_initiative_atomic() (PL/pgSQL) for atomic INSERT + session
+    UPDATE — a single SQL call via the Management API. If any DB operation
+    fails, the function rolls back automatically (no inconsistent state).
+
     Args:
         session_id: The session that produced this DBI.
         user_id: UUID (sub from JWT) of the postulant.
@@ -176,92 +179,48 @@ async def persist_initiative(
     escaped_extra = dbi_extra_json.replace("'", "''")
     escaped_raw = dbi_text.replace("'", "''")
 
+    # ── Call atomic PL/pgSQL function (single Management API request) ────
+    # The function does: nextval → code → INSERT → UPDATE session → RETURN row
     pool = get_pool()
     async with pool.acquire() as conn:
-        # ── Generate initiative_code ──────────────────────────────────────
-        seq_row = await conn.fetchrow(
-            "SELECT nextval('seq_initiative_code') AS seq"
-        )
-        seq_num = seq_row["seq"]
-        year = datetime.utcnow().year
-        initiative_code = f"INI-{year}-{seq_num:03d}"
-
-        # ── Build column values ───────────────────────────────────────────
-        columns = [
-            "session_id", "user_id", "status", "initiative_code",
-            "title", "initiative_type", "postulation_date", "area",
-            "applicant_name", "problem", "solution",
-            "economic_impact", "trl", "scalability",
-            "internal_client", "external_client", "crl",
-            "sponsor", "internal_team", "external_team",
-            "estimated_duration",
-            "main_doubt", "key_condition", "value_capture", "brl",
-            "technical_milestones", "financial_milestones",
-            "return_horizon", "strategic_alignment",
-            "dbi_raw_text", "dbi_extra",
-        ]
-
-        values = ", ".join([
-            str(session_id),                            # session_id
-            _sql_str(user_id),                          # user_id
-            "'persistido'",                             # status
-            _sql_str(initiative_code),                   # initiative_code
-            _sql_str(header.get("title")),              # title
-            _sql_str(header.get("initiative_type")),    # initiative_type
-            _sql_str(header.get("postulation_date")),   # postulation_date
-            _sql_str(header.get("area")),               # area
-            _sql_str(header.get("applicant_name")),     # applicant_name
-            _sql_str(parsed.get("block_a_problem", {}).get("problem")),  # problem
-            _sql_str(b.get("description")),             # solution
-            _sql_str(ei.get("value")),                  # economic_impact
-            _sql_int(trl.get("level")),                 # trl (SMALLINT)
-            _sql_str(b.get("scalability")),             # scalability
-            _sql_str(c.get("internal_client")),         # internal_client
-            _sql_str(c.get("external_client")),         # external_client
-            _sql_int(crl.get("level")),                 # crl (SMALLINT)
-            _sql_str(e.get("sponsor")),                 # sponsor
-            _sql_str(e.get("internal_team")),           # internal_team
-            _sql_str(e.get("external_team")),           # external_team
-            _sql_str(e.get("estimated_duration")),      # estimated_duration
-            _sql_str(f.get("main_doubt")),              # main_doubt
-            _sql_str(f.get("key_condition")),           # key_condition
-            _sql_str(f.get("value_capture")),           # value_capture
-            _sql_int(brl.get("level")),                 # brl (SMALLINT)
-            _sql_str(g.get("technical_milestones")),    # technical_milestones
-            _sql_str(g.get("financial_milestones")),    # financial_milestones
-            _sql_int(g.get("return_horizon_months")),   # return_horizon (SMALLINT)
-            _sql_str(d.get("focus")),                   # strategic_alignment
-            _sql_str(escaped_raw),                      # dbi_raw_text
-            f"'{escaped_extra}'::jsonb",                # dbi_extra
-        ])
-
-        sql = (
-            f"INSERT INTO initiatives ({', '.join(columns)}) "
-            f"VALUES ({values})"
-        )
-
-        await conn.execute(sql)
-
-        # ── Read back the inserted initiative ─────────────────────────────
         row = await conn.fetchrow(
-            f"SELECT id FROM initiatives "
-            f"WHERE initiative_code = '{initiative_code}'"
+            f"SELECT * FROM persist_initiative_atomic("
+            f"{session_id}, "
+            f"'{user_id}', "
+            f"{_sql_str(header.get('title'))}, "
+            f"{_sql_str(header.get('initiative_type'))}, "
+            f"{_sql_str(header.get('postulation_date'))}::date, "
+            f"{_sql_str(header.get('area'))}, "
+            f"{_sql_str(header.get('applicant_name'))}, "
+            f"{_sql_str(parsed.get('block_a_problem', {}).get('problem'))}, "
+            f"{_sql_str(b.get('description'))}, "
+            f"{_sql_str(ei.get('value'))}, "
+            f"{_sql_int(trl.get('level'))}::smallint, "
+            f"{_sql_str(b.get('scalability'))}, "
+            f"{_sql_str(c.get('internal_client'))}, "
+            f"{_sql_str(c.get('external_client'))}, "
+            f"{_sql_int(crl.get('level'))}::smallint, "
+            f"{_sql_str(e.get('sponsor'))}, "
+            f"{_sql_str(e.get('internal_team'))}, "
+            f"{_sql_str(e.get('external_team'))}, "
+            f"{_sql_str(e.get('estimated_duration'))}, "
+            f"{_sql_str(f.get('main_doubt'))}, "
+            f"{_sql_str(f.get('key_condition'))}, "
+            f"{_sql_str(f.get('value_capture'))}, "
+            f"{_sql_int(brl.get('level'))}::smallint, "
+            f"{_sql_str(g.get('technical_milestones'))}, "
+            f"{_sql_str(g.get('financial_milestones'))}, "
+            f"{_sql_int(g.get('return_horizon_months'))}::smallint, "
+            f"{_sql_str(d.get('focus'))}, "
+            f"{_sql_str(escaped_raw)}, "
+            f"'{escaped_extra}'::jsonb"
+            f")"
         )
-        initiative_id = row["id"]
 
-        # ── Transition session → completed ────────────────────────────────
-        await conn.execute(
-            f"UPDATE sessions SET status = 'completed', "
-            f"ended_at = now(), updated_at = now() "
-            f"WHERE id = {session_id}"
-        )
+    initiative_id = row["id"]
+    initiative_code = row["initiative_code"]
 
-        # ── Read back full initiative row ─────────────────────────────────
-        full_row = await conn.fetchrow(
-            f"SELECT * FROM initiatives WHERE id = {initiative_id}"
-        )
-
-    # ── Step 8: Create notification records (outside the conn context) ────
+    # ── Step 8: Create notification records (non-critical, after atomic DB op) ─
     try:
         from app.services.notification_service import create_notifications
         await create_notifications(
@@ -282,7 +241,7 @@ async def persist_initiative(
         initiative_id, initiative_code, session_id,
     )
 
-    return dict(full_row)
+    return dict(row)
 
 
 def detect_dbi_in_message(content: str) -> bool:

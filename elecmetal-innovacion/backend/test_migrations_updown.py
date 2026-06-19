@@ -173,6 +173,39 @@ async def test_002_down_would_revert_correctly():
         print("  [PASS] 002 Up/Down logic verified")
 
 
+async def test_003_atomic_function():
+    """Verify 003_atomic_persist_initiative.sql function exists and works."""
+    print("\n--- Test: 003_atomic_persist_initiative ---")
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Verify function exists
+        func = await conn.fetchrow(
+            "SELECT proname, proargtypes::text, prosrc "
+            "FROM pg_proc WHERE proname = 'persist_initiative_atomic'"
+        )
+        assert func is not None, "persist_initiative_atomic() function missing — run migration 003"
+        print("  [PASS] persist_initiative_atomic() exists")
+
+        # Verify it has 29 parameters
+        arg_count = len(func["proargtypes"].split()) if func["proargtypes"] else 0
+        print(f"  Function has {arg_count} parameters")
+
+        # Verify it returns SETOF initiatives
+        returns = await conn.fetchval(
+            "SELECT pg_get_function_result(oid) "
+            "FROM pg_proc WHERE proname = 'persist_initiative_atomic'"
+        )
+        print(f"  Returns: {returns}")
+
+        # Verify the function body contains key operations
+        body = func["prosrc"]
+        assert "nextval" in body, "Missing nextval(seq_initiative_code)"
+        assert "INSERT INTO initiatives" in body, "Missing INSERT"
+        assert "UPDATE sessions" in body, "Missing UPDATE sessions"
+        print("  [PASS] Function body: nextval + INSERT + UPDATE sessions")
+
+
 async def test_trigger_fixed():
     """Verify handle_new_user() trigger has search_path set."""
     print("\n--- Test: handle_new_user() trigger security ---")
@@ -221,6 +254,7 @@ async def main():
         await test_001_initial_schema()
         await test_002_v59_alignment()
         await test_002_down_would_revert_correctly()
+        await test_003_atomic_function()
         await test_trigger_fixed()
 
         print("\n" + "=" * 60)
