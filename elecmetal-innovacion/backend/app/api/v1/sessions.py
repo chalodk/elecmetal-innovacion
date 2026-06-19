@@ -1,19 +1,25 @@
+"""Sessions API — POST /, GET /, GET /{id}, GET /{id}/messages, POST /{id}/messages."""
+
 import json
 import logging
-import re
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.database import get_pool
+from app.core.errors import AppError, ErrorCode
 from app.core.pagination import (
     validate_cursor,
     validate_limit,
     paginated_response,
 )
-from app.core.security import get_current_user
+from app.core.security import (
+    get_current_user,
+    require_user_id,
+    require_bigint_id,
+)
 from app.services.clara import ClaraService
 from app.services.analista import AnalistaService
 from app.services.dbi_persistence import detect_dbi_in_message, persist_initiative
@@ -39,17 +45,10 @@ except RuntimeError as exc:
     analista_service = None
     logger.warning("AnalistaService not available: %s", exc)
 
-# ── Validation ──────────────────────────────────────────────────────────────
-
 _VALID_AGENT_TYPES = {"clara", "analista_oportunidad"}
-_BIGINT_RE = re.compile(r"^[0-9]{1,19}$")  # max 19 digits (fits in bigint)
 
 
-def _is_valid_bigint(value: str) -> bool:
-    return bool(_BIGINT_RE.match(value))
-
-
-# ── Request models ────────────────────────────────────────────────────────────
+# ── Request models ──────────────────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
     agent_type: str = "clara"
@@ -64,10 +63,10 @@ class UpdateSessionRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _dict_from_row(row: dict, include_user_id: bool = False) -> dict:
-    """Converts a row dict (camelCase from DB) to response dict (snake_case)."""
+    """Converts a row dict to response dict."""
     result = {
         "id": row["id"],
         "agent_type": row.get("agent_type"),
@@ -80,7 +79,7 @@ def _dict_from_row(row: dict, include_user_id: bool = False) -> dict:
     return result
 
 
-# ── POST / ────────────────────────────────────────────────────────────────────
+# ── POST / ──────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_session(
@@ -88,31 +87,28 @@ async def create_session(
     user: dict = Depends(get_current_user),
 ):
     """Crea una nueva sesion de chat con un agente IA."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token sin identificador de usuario",
-        )
+    user_id = require_user_id(user)
 
     if body.agent_type not in _VALID_AGENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"agent_type debe ser uno de: {', '.join(sorted(_VALID_AGENT_TYPES))}",
+        raise AppError(
+            code=ErrorCode.INVALID_AGENT_TYPE,
+            message=f"agent_type debe ser uno de: {', '.join(sorted(_VALID_AGENT_TYPES))}",
+            details={"field": "agent_type", "value": body.agent_type},
         )
 
+    escaped_title = body.title.replace("'", "''")
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             f"INSERT INTO sessions (user_id, agent_type, status, title) "
-            f"VALUES ('{user_id}', '{body.agent_type}', 'active', 'Nueva sesion') "
+            f"VALUES ('{user_id}', '{body.agent_type}', 'active', '{escaped_title}') "
             f"RETURNING *"
         )
 
     return _dict_from_row(row, include_user_id=True)
 
 
-# ── GET / ─────────────────────────────────────────────────────────────────────
+# ── GET / ───────────────────────────────────────────────────────────────────
 
 @router.get("")
 async def list_sessions(
@@ -122,9 +118,7 @@ async def list_sessions(
     agent_filter: str | None = Query(None, description="Filter by agent_type"),
 ):
     """Lista las sesiones activas del usuario autenticado con paginacion."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin identificador de usuario")
+    user_id = require_user_id(user)
 
     cursor_val = validate_cursor(cursor)
     page_limit = validate_limit(limit)
@@ -155,7 +149,7 @@ async def list_sessions(
     )
 
 
-# ── GET /{id} ────────────────────────────────────────────────────────────────
+# ── GET /{id} ──────────────────────────────────────────────────────────────
 
 @router.get("/{session_id}")
 async def get_session(
@@ -163,24 +157,23 @@ async def get_session(
     user: dict = Depends(get_current_user),
 ):
     """Obtiene una sesion con metadata extendida."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin identificador de usuario")
-    if not _is_valid_bigint(session_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de sesion invalido")
+    user_id = require_user_id(user)
+    sid = require_bigint_id(session_id, "session_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             f"SELECT * FROM sessions "
-            f"WHERE id = {session_id} AND user_id = '{user_id}'"
+            f"WHERE id = {sid} AND user_id = '{user_id}'"
         )
         if not row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion no encontrada")
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Sesion no encontrada",
+            )
 
-        # Count messages
         msg_count = await conn.fetchval(
-            f"SELECT count(*) FROM messages WHERE session_id = {session_id}"
+            f"SELECT count(*) FROM messages WHERE session_id = {sid}"
         )
 
     result = _dict_from_row(row, include_user_id=True)
@@ -192,51 +185,57 @@ async def get_session(
     return result
 
 
-# ── GET /{id}/messages ────────────────────────────────────────────────────────
+# ── GET /{id}/messages ──────────────────────────────────────────────────────
 
 @router.get("/{session_id}/messages")
 async def get_messages(
     session_id: str,
     user: dict = Depends(get_current_user),
+    cursor: str | None = Query(None, description="Cursor for pagination (message id)"),
+    limit: str | None = Query(None, description=f"Page size (max {100})"),
 ):
-    """Obtiene el historial de mensajes de una sesion."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token sin identificador de usuario",
-        )
+    """Obtiene el historial de mensajes de una sesion con paginacion cursor."""
+    user_id = require_user_id(user)
+    sid = require_bigint_id(session_id, "session_id")
 
-    if not _is_valid_bigint(session_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de sesion invalido",
-        )
+    cursor_val = validate_cursor(cursor)
+    page_limit = validate_limit(limit)
 
     pool = get_pool()
     async with pool.acquire() as conn:
         # Verify session exists and belongs to user
         session_row = await conn.fetchrow(
             f"SELECT id FROM sessions "
-            f"WHERE id = {session_id} AND user_id = '{user_id}'"
+            f"WHERE id = {sid} AND user_id = '{user_id}'"
         )
         if not session_row:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sesion no encontrada",
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Sesion no encontrada",
             )
+
+        conditions = [f"session_id = {sid}"]
+        if cursor_val is not None:
+            conditions.append(f"id > {cursor_val}")
+
+        where_clause = "WHERE " + " AND ".join(conditions)
 
         rows = await conn.fetch(
             f"SELECT id, session_id, role, content, metadata, created_at "
             f"FROM messages "
-            f"WHERE session_id = {session_id} "
-            f"ORDER BY created_at ASC"
+            f"{where_clause} "
+            f"ORDER BY created_at ASC, id ASC "
+            f"LIMIT {page_limit + 1}"
         )
 
-    return [dict(r) for r in rows]
+    return paginated_response(
+        [dict(r) for r in rows],
+        cursor_field="id",
+        limit=page_limit,
+    )
 
 
-# ── POST /{id}/messages ───────────────────────────────────────────────────────
+# ── POST /{id}/messages ─────────────────────────────────────────────────────
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -269,14 +268,12 @@ async def _stream_agent_response(
     """SSE generator: stream agent tokens, persist response, detect DBI (Clara only)."""
     full_response: list[str] = []
 
-    # Choose service
     if agent_type == "analista_oportunidad":
         service = analista_service
     else:
         service = clara_service
 
     if service is None:
-        # Fallback to placeholder
         async for chunk in _stream_placeholder(session_id):
             yield chunk
         return
@@ -344,7 +341,6 @@ async def _stream_placeholder(
         "Clara no esta disponible en este momento. "
         "Intentaremos conectarla pronto."
     )
-    # Stream word by word for a more natural feel
     words = PLACEHOLDER.split(" ")
     for i, word in enumerate(words):
         token = word + (" " if i < len(words) - 1 else "")
@@ -361,30 +357,19 @@ async def send_message(
     user: dict = Depends(get_current_user),
 ):
     """Envia un mensaje en una sesion y streamea la respuesta de Clara via SSE."""
-    user_id = user.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token sin identificador de usuario",
-        )
-
-    if not _is_valid_bigint(session_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID de sesion invalido",
-        )
+    user_id = require_user_id(user)
+    sid = require_bigint_id(session_id, "session_id")
 
     pool = get_pool()
     async with pool.acquire() as conn:
-        # Verify session exists, belongs to user, and get agent_type
         session_row = await conn.fetchrow(
             f"SELECT id, agent_type FROM sessions "
-            f"WHERE id = {session_id} AND user_id = '{user_id}'"
+            f"WHERE id = {sid} AND user_id = '{user_id}'"
         )
         if not session_row:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sesion no encontrada",
+            raise AppError(
+                code=ErrorCode.NOT_FOUND,
+                message="Sesion no encontrada",
             )
 
         agent_type = session_row["agent_type"]
@@ -392,18 +377,18 @@ async def send_message(
         escaped_content = body.content.replace("'", "''")
         await conn.execute(
             f"INSERT INTO messages (session_id, role, content) "
-            f"VALUES ({session_id}, 'user', '{escaped_content}')"
+            f"VALUES ({sid}, 'user', '{escaped_content}')"
         )
 
         rows = await conn.fetch(
             f"SELECT role, content FROM messages "
-            f"WHERE session_id = {session_id} "
+            f"WHERE session_id = {sid} "
             f"ORDER BY created_at ASC"
         )
 
     history = [{"role": r["role"], "content": r["content"]} for r in rows]
 
-    generator = _stream_agent_response(session_id, user_id, history, agent_type)
+    generator = _stream_agent_response(str(sid), user_id, history, agent_type)
 
     return StreamingResponse(
         generator,
