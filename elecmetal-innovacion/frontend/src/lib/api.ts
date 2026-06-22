@@ -11,7 +11,9 @@ async function authFetch(token: string, path: string, options?: RequestInit) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Error ${res.status}`);
+    // Unified error format: {"error": {"code": "...", "message": "...", "details": {...}}}
+    const message = body.error?.message || body.detail || `Error ${res.status}`;
+    throw new Error(message);
   }
   return res.json();
 }
@@ -109,8 +111,33 @@ export async function listSessions(token: string) {
 
 // ── Messages ──────────────────────────────────────────────────────────────
 
-export async function getMessages(token: string, sessionId: string) {
-  return authFetch(token, `/api/v1/sessions/${sessionId}/messages`);
+export interface PaginatedMessages {
+  data: Array<{
+    id: number;
+    session_id: number;
+    role: "user" | "assistant" | "system";
+    content: string;
+    metadata: unknown;
+    created_at: string;
+  }>;
+  pagination: {
+    has_more: boolean;
+    next_cursor: string | null;
+    limit: number;
+  };
+}
+
+export async function getMessages(
+  token: string,
+  sessionId: string,
+  cursor?: string | null,
+): Promise<PaginatedMessages> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  return authFetch(
+    token,
+    `/api/v1/sessions/${sessionId}/messages?${params.toString()}`,
+  );
 }
 
 export interface SSEEvent {
@@ -145,7 +172,8 @@ export async function sendMessage(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Error ${res.status}`);
+    const message = body.error?.message || body.detail || `Error ${res.status}`;
+    throw new Error(message);
   }
 
   const reader = res.body?.getReader();

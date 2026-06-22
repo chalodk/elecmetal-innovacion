@@ -1,57 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import {
-  getInitiative,
-  triggerEvaluation,
-  getEvaluationByInitiative,
-  reviewEvaluation,
-} from "@/lib/api";
-import { StatusBadge, InfoCard, Badge, ScoreBox } from "@/components/ui";
-
-interface InitiativeDetail {
-  id: number;
-  initiative_code: string;
-  title: string;
-  status: string;
-  initiative_type: string;
-  area: string;
-  applicant_name: string;
-  problem: string;
-  solution: string;
-  economic_impact: string;
-  trl: number | null;
-  crl: number | null;
-  brl: number | null;
-  scalability: string;
-  internal_client: string;
-  external_client: string;
-  sponsor: string;
-  internal_team: string;
-  external_team: string;
-  estimated_duration: string;
-  main_doubt: string;
-  key_condition: string;
-  value_capture: string;
-  technical_milestones: string;
-  financial_milestones: string;
-  return_horizon: number | null;
-  strategic_alignment: string;
-  dbi_raw_text: string;
-  dbi_extra: Record<string, unknown> | null;
-  postulation_date: string;
-  created_at: string;
-  updated_at: string;
-}
+  useInitiative,
+  useTriggerEvaluation,
+  useEvaluationByInitiative,
+  useReviewEvaluation,
+} from "@/lib/hooks";
+import { InfoCard, Badge, ScoreBox } from "@/components/ui";
 
 interface EvaluationData {
   id: number;
   initiative_id: number;
   status: string;
   results: {
-    scores: Record<string, Record<string, { score: number; evidence: string }>>;
+    scores: Record<
+      string,
+      Record<string, { score: number; evidence: string }>
+    >;
     derived: {
       novedad: number;
       indice_incertidumbre: number;
@@ -63,11 +30,9 @@ interface EvaluationData {
       recomendacion: string;
     };
   } | null;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   veredicto: string | null;
+  reviewed_at: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -93,77 +58,23 @@ export default function InitiativeDetailPage() {
   const router = useRouter();
   const id = params.id as string;
 
-  const [initiative, setInitiative] = useState<InitiativeDetail | null>(null);
-  const [evaluation, setEvaluation] = useState<EvaluationData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [veredicto, setVeredicto] = useState<string>("");
+  const {
+    data: initiative,
+    isLoading: loading,
+    error: loadError,
+  } = useInitiative(id);
 
-  const supabase = createClient();
+  const { data: evaluation } = useEvaluationByInitiative(id);
+  const activateEvaluator = useTriggerEvaluation();
+  const reviewEval = useReviewEvaluation();
 
-  const load = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push("/login"); return; }
+  const [veredicto, setVeredicto] = useState("");
 
-      const init = await getInitiative(session.access_token, id);
-      setInitiative(init);
-
-      // Load evaluation via the new initiative-scoped endpoint
-      try {
-        const evalData = await getEvaluationByInitiative(
-          session.access_token,
-          id,
-        );
-        setEvaluation(evalData);
-      } catch {
-        // No evaluation yet — that's fine
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { load(); }, [id]);
-
-  const handleTriggerEvaluator = async () => {
-    if (!initiative) return;
-    setActionLoading(true);
-    setError(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      await triggerEvaluation(session.access_token, String(initiative.id));
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleVeredicto = async () => {
-    if (!evaluation || !veredicto) return;
-    setActionLoading(true);
-    setError(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      await reviewEvaluation(session.access_token, String(evaluation.id), {
-        veredicto,
-        validate: true,
-      });
-      await load();
-      setVeredicto("");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const error =
+    (loadError as Error)?.message ||
+    (activateEvaluator.error as Error)?.message ||
+    (reviewEval.error as Error)?.message ||
+    null;
 
   if (loading) {
     return (
@@ -188,6 +99,7 @@ export default function InitiativeDetailPage() {
   }
 
   const extra = initiative.dbi_extra as Record<string, unknown> | null;
+  const evalData = evaluation as EvaluationData | null;
 
   return (
     <div className="p-6 space-y-4 max-w-4xl">
@@ -207,7 +119,7 @@ export default function InitiativeDetailPage() {
         </span>
       </div>
 
-      {/* Status + Type */}
+      {/* Status */}
       <div className="flex items-center gap-3">
         <span className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
           {STATUS_LABELS[initiative.status] || initiative.status}
@@ -224,20 +136,24 @@ export default function InitiativeDetailPage() {
       <div className="flex items-center gap-2">
         {initiative.status === "notificado" && (
           <button
-            onClick={handleTriggerEvaluator}
-            disabled={actionLoading}
+            onClick={() => activateEvaluator.mutate(id)}
+            disabled={activateEvaluator.isPending}
             className="px-3 py-1.5 text-sm font-medium rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50"
           >
-            {actionLoading ? "Procesando…" : "Enviar a evaluacion"}
+            {activateEvaluator.isPending
+              ? "Procesando…"
+              : "Enviar a evaluacion"}
           </button>
         )}
         {initiative.status === "en_evaluacion" && (
           <button
-            onClick={handleTriggerEvaluator}
-            disabled={actionLoading}
+            onClick={() => activateEvaluator.mutate(id)}
+            disabled={activateEvaluator.isPending}
             className="px-3 py-1.5 text-sm font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
           >
-            {actionLoading ? "Evaluando…" : "Activar Evaluador IA"}
+            {activateEvaluator.isPending
+              ? "Evaluando…"
+              : "Activar Evaluador IA"}
           </button>
         )}
       </div>
@@ -248,11 +164,18 @@ export default function InitiativeDetailPage() {
           <p className="text-sm text-gray-700">{initiative.problem}</p>
           {extra && (
             <div className="mt-2 space-y-1 text-xs text-gray-500">
-              {(extra.block_a_extra as Record<string, string>)?.why_it_matters && (
-                <p><strong>Por que importa:</strong> {(extra.block_a_extra as Record<string, string>).why_it_matters}</p>
+              {(extra.block_a_extra as Record<string, string>)
+                ?.why_it_matters && (
+                <p>
+                  <strong>Por que importa:</strong>{" "}
+                  {(extra.block_a_extra as Record<string, string>).why_it_matters}
+                </p>
               )}
               {(extra.block_a_extra as Record<string, string>)?.who_has_it && (
-                <p><strong>Quien lo tiene:</strong> {(extra.block_a_extra as Record<string, string>).who_has_it}</p>
+                <p>
+                  <strong>Quien lo tiene:</strong>{" "}
+                  {(extra.block_a_extra as Record<string, string>).who_has_it}
+                </p>
               )}
             </div>
           )}
@@ -269,11 +192,19 @@ export default function InitiativeDetailPage() {
           </div>
           {extra && (
             <div className="mt-2 space-y-1 text-xs text-gray-500">
-              {(extra.block_b_extra as Record<string, string>)?.differentiator_novelty_grade && (
-                <p><strong>Novedad:</strong> {(extra.block_b_extra as Record<string, string>).differentiator_novelty_grade}</p>
+              {(extra.block_b_extra as Record<string, string>)
+                ?.differentiator_novelty_grade && (
+                <p>
+                  <strong>Novedad:</strong>{" "}
+                  {(extra.block_b_extra as Record<string, string>).differentiator_novelty_grade}
+                </p>
               )}
-              {(extra.block_b_extra as Record<string, string>)?.trl_evidence && (
-                <p><strong>Evidencia TRL:</strong> {(extra.block_b_extra as Record<string, string>).trl_evidence}</p>
+              {(extra.block_b_extra as Record<string, string>)
+                ?.trl_evidence && (
+                <p>
+                  <strong>Evidencia TRL:</strong>{" "}
+                  {(extra.block_b_extra as Record<string, string>).trl_evidence}
+                </p>
               )}
             </div>
           )}
@@ -320,105 +251,108 @@ export default function InitiativeDetailPage() {
 
         <InfoCard title="Hitos (Bloque G)">
           <p className="text-sm text-gray-700">
-            <strong>Tecnicos:</strong> {initiative.technical_milestones || "—"}
+            <strong>Tecnicos:</strong>{" "}
+            {initiative.technical_milestones || "—"}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Economicos:</strong> {initiative.financial_milestones || "—"}
+            <strong>Economicos:</strong>{" "}
+            {initiative.financial_milestones || "—"}
           </p>
           <div className="mt-2">
-            <Badge label="Retorno" value={initiative.return_horizon ? `${initiative.return_horizon} meses` : "—"} />
+            <Badge
+              label="Retorno"
+              value={
+                initiative.return_horizon
+                  ? `${initiative.return_horizon} meses`
+                  : "—"
+              }
+            />
           </div>
         </InfoCard>
       </div>
 
-      {/* Evaluation Results (if exists) */}
-      {evaluation && evaluation.results && (
+      {/* Evaluation Results */}
+      {evalData?.results && (
         <div className="space-y-4">
           <h2 className="text-lg font-bold text-gray-900 pt-4 border-t">
             Resultados del Evaluador
           </h2>
 
-          {/* Derived scores */}
           <div className="grid grid-cols-4 gap-3">
             <ScoreBox
               label="Puntaje Total"
-              value={evaluation.results.derived.puntaje_total}
+              value={evalData.results.derived.puntaje_total}
               max={110}
             />
             <ScoreBox
               label="Normalizado"
-              value={evaluation.results.derived.puntaje_normalizado}
+              value={evalData.results.derived.puntaje_normalizado}
               max={100}
             />
             <ScoreBox
               label="Novedad"
-              value={evaluation.results.derived.novedad}
+              value={evalData.results.derived.novedad}
               max={5}
             />
             <ScoreBox
               label="Incertidumbre"
-              value={evaluation.results.derived.indice_incertidumbre}
+              value={evalData.results.derived.indice_incertidumbre}
               max={5}
               precision={1}
             />
           </div>
 
-          {/* Compuertas */}
           <div className="flex gap-3 text-sm">
             <span className="px-3 py-1 rounded bg-gray-100 text-gray-700">
-              Sandbox: {evaluation.results.derived.compuerta_sandbox}
+              Sandbox: {evalData.results.derived.compuerta_sandbox}
             </span>
             <span className="px-3 py-1 rounded bg-gray-100 text-gray-700">
-              Innovacion: {evaluation.results.derived.compuerta_innovacion}
+              Innovacion: {evalData.results.derived.compuerta_innovacion}
             </span>
           </div>
 
-          {/* Dimension scores */}
-          <div className="space-y-2">
-            {Object.entries(evaluation.results.scores).map(([dim, items]) => (
-              <div key={dim} className="rounded border bg-white p-3">
-                <h3 className="text-sm font-semibold text-gray-800 mb-2">
-                  {DIMENSION_LABELS[dim] || dim}
-                </h3>
-                <div className="space-y-1">
-                  {Object.entries(items).map(([key, item]) => (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between gap-3 text-xs"
+          {Object.entries(evalData.results.scores).map(([dim, items]) => (
+            <div key={dim} className="rounded border bg-white p-3">
+              <h3 className="text-sm font-semibold text-gray-800 mb-2">
+                {DIMENSION_LABELS[dim] || dim}
+              </h3>
+              <div className="space-y-1">
+                {Object.entries(items).map(([key, item]) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-3 text-xs"
+                  >
+                    <span className="text-gray-600 flex-1">
+                      {key.replace(/_/g, " ")}:{" "}
+                      <span className="text-gray-400 italic">
+                        {item.evidence?.slice(0, 80)}
+                        {(item.evidence?.length || 0) > 80 ? "…" : ""}
+                      </span>
+                    </span>
+                    <span
+                      className={`inline-block w-6 h-6 rounded text-center leading-6 font-bold text-xs ${
+                        item.score === 5
+                          ? "bg-green-100 text-green-700"
+                          : item.score === 3
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-red-100 text-red-700"
+                      }`}
                     >
-                      <span className="text-gray-600 flex-1">
-                        {key.replace(/_/g, " ")}:{" "}
-                        <span className="text-gray-400 italic">
-                          {item.evidence?.slice(0, 80)}
-                          {(item.evidence?.length || 0) > 80 ? "…" : ""}
-                        </span>
-                      </span>
-                      <span
-                        className={`inline-block w-6 h-6 rounded text-center leading-6 font-bold text-xs ${
-                          item.score === 5
-                            ? "bg-green-100 text-green-700"
-                            : item.score === 3
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {item.score}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                      {item.score}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
 
-          {/* Resumen y recomendacion */}
           <div className="rounded border bg-white p-4 space-y-2">
             <p className="text-sm text-gray-700">
-              <strong>Resumen:</strong> {evaluation.results.derived.resumen}
+              <strong>Resumen:</strong> {evalData.results.derived.resumen}
             </p>
             <p className="text-sm text-gray-700">
               <strong>Recomendacion:</strong>{" "}
-              {evaluation.results.derived.recomendacion}
+              {evalData.results.derived.recomendacion}
             </p>
           </div>
 
@@ -427,23 +361,28 @@ export default function InitiativeDetailPage() {
             <h3 className="text-sm font-semibold text-gray-800 mb-3">
               Registrar Veredicto del Comite
             </h3>
-            {evaluation.veredicto ? (
+            {evalData.veredicto ? (
               <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-600">Veredicto actual:</span>
+                <span className="text-sm text-gray-600">
+                  Veredicto actual:
+                </span>
                 <span
                   className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    evaluation.veredicto === "aprobada"
+                    evalData.veredicto === "aprobada"
                       ? "bg-green-100 text-green-700"
-                      : evaluation.veredicto === "rechazada"
+                      : evalData.veredicto === "rechazada"
                         ? "bg-red-100 text-red-700"
                         : "bg-yellow-100 text-yellow-700"
                   }`}
                 >
-                  {evaluation.veredicto}
+                  {evalData.veredicto}
                 </span>
-                {evaluation.reviewed_at && (
+                {evalData.reviewed_at && (
                   <span className="text-xs text-gray-400">
-                    Validado: {new Date(evaluation.reviewed_at).toLocaleDateString("es-CL")}
+                    Validado:{" "}
+                    {new Date(evalData.reviewed_at).toLocaleDateString(
+                      "es-CL",
+                    )}
                   </span>
                 )}
               </div>
@@ -460,11 +399,17 @@ export default function InitiativeDetailPage() {
                   <option value="pendiente">Pendiente</option>
                 </select>
                 <button
-                  onClick={handleVeredicto}
-                  disabled={!veredicto || actionLoading}
+                  onClick={() =>
+                    reviewEval.mutate({
+                      evaluationId: String(evalData.id),
+                      veredicto,
+                      validate: true,
+                    })
+                  }
+                  disabled={!veredicto || reviewEval.isPending}
                   className="px-3 py-1.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {actionLoading ? "Guardando…" : "Registrar y validar"}
+                  {reviewEval.isPending ? "Guardando…" : "Registrar y validar"}
                 </button>
               </div>
             )}
@@ -472,7 +417,14 @@ export default function InitiativeDetailPage() {
         </div>
       )}
 
-      {/* Raw DBI text (collapsible) */}
+      {/* Error */}
+      {error && (
+        <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* Raw DBI text */}
       {initiative.dbi_raw_text && (
         <details className="rounded border bg-white p-3">
           <summary className="text-sm font-medium text-gray-600 cursor-pointer">

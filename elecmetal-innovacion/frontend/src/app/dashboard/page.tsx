@@ -1,56 +1,61 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
-import { fetchMe, listInitiatives } from "@/lib/api";
+"use client";
+
+import { useProfile, useInitiatives } from "@/lib/hooks";
 import Link from "next/link";
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+export default function DashboardPage() {
+  const { data: profile, isLoading: profileLoading } = useProfile();
+  const { data: initiatives = [], isLoading: initiativesLoading } =
+    useInitiatives();
 
-  if (!session) redirect("/login");
-
-  let profile: { full_name?: string; role?: string } = {};
-  let initiatives: Array<{
-    id: number;
-    initiative_code: string;
-    title: string;
-    status: string;
-    initiative_type: string;
-    created_at: string;
-  }> = [];
-
-  try {
-    profile = await fetchMe(session.access_token);
-    const result = await listInitiatives(session.access_token);
-    // Handle paginated envelope: {data: [...], pagination: {...}}
-    initiatives = Array.isArray(result) ? result : (result.data || []);
-  } catch {
-    // Backend no disponible — mostrar datos basicos
-  }
+  const loading = profileLoading || initiativesLoading;
 
   return (
     <div className="space-y-6 p-8">
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+
+      {/* Profile card */}
       <div className="rounded-lg border bg-white p-6 shadow-sm">
-        <p className="text-sm text-gray-600">
-          Bienvenido,{" "}
-          <span className="font-medium text-gray-900">
-            {profile.full_name || session.user.email}
-          </span>
-        </p>
-        <p className="mt-1 text-xs text-gray-400">
-          Rol: {profile.role || "postulante"}
-        </p>
+        {profileLoading ? (
+          <p className="text-sm text-gray-400">Cargando perfil…</p>
+        ) : profile ? (
+          <>
+            <p className="text-sm text-gray-600">
+              Bienvenido,{" "}
+              <span className="font-medium text-gray-900">
+                {profile.full_name}
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              Rol: {profile.role || "postulante"}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-400">
+            No se pudo cargar el perfil.
+          </p>
+        )}
       </div>
 
       {/* Initiatives section */}
-      {initiatives.length > 0 ? (
+      {loading ? (
+        <div className="rounded-lg border bg-white p-8 text-center">
+          <p className="text-sm text-gray-400">Cargando iniciativas…</p>
+        </div>
+      ) : initiatives.length > 0 ? (
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-gray-800">
             Mis Iniciativas
           </h2>
           <div className="space-y-2">
-            {initiatives.map((init) => (
+            {initiatives.map((init: {
+              id: number;
+              initiative_code: string;
+              title: string;
+              status: string;
+              initiative_type: string;
+              created_at: string;
+            }) => (
               <Link
                 key={init.id}
                 href={`/dashboard/initiatives/${init.id}`}

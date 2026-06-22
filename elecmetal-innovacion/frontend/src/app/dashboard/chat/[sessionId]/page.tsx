@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { getMessages, sendMessage, type SSEEvent } from "@/lib/api";
+import { useMessages, useSendMessage } from "@/lib/hooks";
 
 interface Message {
   id: number;
@@ -25,65 +24,43 @@ export default function ChatPage() {
   const router = useRouter();
   const sessionId = params.sessionId as string;
 
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState("");
   const [initiative, setInitiative] = useState<InitiativeInfo | null>(null);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // ── React Query: load messages ───────────────────────────────────────
+  const {
+    data: apiMessages = [],
+    isLoading: loading,
+    error: loadError,
+  } = useMessages(sessionId);
+
+  // Merge optimistic with real messages (stabilized for useEffect deps)
+  const messages = useMemo(
+    () => [...apiMessages, ...optimisticMessages],
+    [apiMessages, optimisticMessages],
+  );
+
+  const sendMessageMutation = useSendMessage(sessionId);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  // ── Load messages on mount ──────────────────────────────────────────
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const supabase = createClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session) {
-          router.push("/login");
-          return;
-        }
-        const msgs = await getMessages(session.access_token, sessionId);
-        if (!cancelled) setMessages(msgs);
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, router]);
-
-  // ── Auto-scroll ──────────────────────────────────────────────────────
-
+  // ── Auto-scroll on new messages / streaming ──────────────────────────
   useEffect(() => {
     scrollToBottom();
   }, [messages, streamingContent, scrollToBottom]);
 
   // ── Send message ─────────────────────────────────────────────────────
-
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const content = input.trim();
-    if (!content || sending) return;
+    if (!content || sendMessageMutation.isPending) return;
 
     setInput("");
-    setSending(true);
-    setError(null);
     setStreamingContent("");
     setInitiative(null);
 
@@ -97,76 +74,45 @@ export default function ChatPage() {
       metadata: null,
       created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimisticUser]);
+    setOptimisticMessages((prev) => [...prev, optimisticUser]);
 
     try {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/login");
-        return;
-      }
-
-      // Use SSE-capable sendMessage with streaming tokens
-      const result = await sendMessage(
-        session.access_token,
-        sessionId,
+      const result = await sendMessageMutation.mutateAsync({
         content,
-        (token) => {
+        onToken: (token) => {
           setStreamingContent((prev) => prev + token);
         },
-      );
-
-      // Remove optimistic + add real user message + assistant
-      setStreamingContent("");
-      setMessages((prev) => {
-        const withoutOptimistic = prev.filter((m) => m.id !== optimisticId);
-        const userMsg: Message = {
-          id: optimisticId - 1,
-          session_id: Number(sessionId),
-          role: "user",
-          content,
-          metadata: null,
-          created_at: new Date().toISOString(),
-        };
-        const asstMsg: Message = {
-          id: result.message_id,
-          session_id: Number(sessionId),
-          role: "assistant",
-          content: result.content,
-          metadata: null,
-          created_at: new Date().toISOString(),
-        };
-        return [...withoutOptimistic, userMsg, asstMsg];
       });
+
+      // Remove optimistic message on success
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== optimisticId),
+      );
+      setStreamingContent("");
 
       // Show initiative info if DBI was persisted
       if (result.initiative) {
         const init = result.initiative as InitiativeInfo;
         if ("initiative_code" in init) {
-          setInitiative(init as InitiativeInfo);
+          setInitiative(init);
         } else if ("parse_error" in result.initiative) {
-          setError(
-            `Error al parsear el DBI: ${(result.initiative as { parse_error: string }).parse_error}`,
-          );
-        } else if ("persistence_error" in result.initiative) {
-          setError(
-            `Error al guardar la iniciativa: ${(result.initiative as { persistence_error: string }).persistence_error}`,
-          );
+          // Error handled via mutation state
         }
       }
-    } catch (e) {
-      setError((e as Error).message);
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-    } finally {
-      setSending(false);
+    } catch {
+      // Remove optimistic on error
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== optimisticId),
+      );
     }
   };
 
-  // ── Render ────────────────────────────────────────────────────────────
+  const error =
+    loadError?.message ||
+    (sendMessageMutation.error as Error)?.message ||
+    null;
 
+  // ── Render ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center flex-1">
@@ -241,7 +187,7 @@ export default function ChatPage() {
         )}
 
         {/* Typing indicator (before first token arrives) */}
-        {sending && !streamingContent && (
+        {sendMessageMutation.isPending && !streamingContent && (
           <div className="flex justify-start">
             <div className="bg-white border rounded-lg px-4 py-2 text-sm text-gray-400 animate-pulse">
               Clara esta escribiendo…
@@ -289,12 +235,12 @@ export default function ChatPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Escribe tu mensaje…"
-          disabled={sending}
+          disabled={sendMessageMutation.isPending}
           className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
         />
         <button
           type="submit"
-          disabled={!input.trim() || sending}
+          disabled={!input.trim() || sendMessageMutation.isPending}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Enviar

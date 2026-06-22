@@ -1,79 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { getInitiative } from "@/lib/api";
+import { useInitiative } from "@/lib/hooks";
 import { StatusBadge, InfoCard, Badge } from "@/components/ui";
-
-interface InitiativeDetail {
-  id: number;
-  initiative_code: string;
-  title: string;
-  status: string;
-  initiative_type: string;
-  area: string;
-  applicant_name: string;
-  problem: string;
-  solution: string;
-  economic_impact: string;
-  trl: number | null;
-  crl: number | null;
-  brl: number | null;
-  scalability: string;
-  internal_client: string;
-  external_client: string;
-  sponsor: string;
-  internal_team: string;
-  external_team: string;
-  estimated_duration: string;
-  main_doubt: string;
-  key_condition: string;
-  value_capture: string;
-  technical_milestones: string;
-  financial_milestones: string;
-  return_horizon: number | null;
-  strategic_alignment: string;
-  dbi_raw_text: string;
-  dbi_extra: Record<string, unknown> | null;
-  postulation_date: string;
-  created_at: string;
-}
 
 export default function InitiativeDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
-  const [initiative, setInitiative] = useState<InitiativeDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const supabase = createClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session) {
-          router.push("/login");
-          return;
-        }
-        const data = await getInitiative(session.access_token, id);
-        if (!cancelled) setInitiative(data);
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [id, router]);
+  const {
+    data: initiative,
+    isLoading: loading,
+    error: loadError,
+  } = useInitiative(id);
 
   if (loading) {
     return (
@@ -83,11 +23,11 @@ export default function InitiativeDetailPage() {
     );
   }
 
-  if (error || !initiative) {
+  if (loadError || !initiative) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-3">
         <p className="text-sm text-red-600">
-          {error || "Iniciativa no encontrada"}
+          {(loadError as Error)?.message || "Iniciativa no encontrada"}
         </p>
         <button
           onClick={() => router.push("/dashboard")}
@@ -128,7 +68,9 @@ export default function InitiativeDetailPage() {
         <span className="text-sm text-gray-400">
           Postulada:{" "}
           {initiative.postulation_date
-            ? new Date(initiative.postulation_date).toLocaleDateString("es-CL")
+            ? new Date(
+                initiative.postulation_date,
+              ).toLocaleDateString("es-CL")
             : "—"}
         </span>
       </div>
@@ -140,10 +82,16 @@ export default function InitiativeDetailPage() {
           {extra?.block_a_extra ? (
             <div className="mt-2 space-y-1 text-xs text-gray-500">
               {(extra.block_a_extra as Record<string, string>).why_it_matters ? (
-                <p><strong>Por que importa:</strong> {(extra.block_a_extra as Record<string, string>).why_it_matters}</p>
+                <p>
+                  <strong>Por que importa:</strong>{" "}
+                  {(extra.block_a_extra as Record<string, string>).why_it_matters}
+                </p>
               ) : null}
               {(extra.block_a_extra as Record<string, string>).who_has_it ? (
-                <p><strong>Quien lo tiene:</strong> {(extra.block_a_extra as Record<string, string>).who_has_it}</p>
+                <p>
+                  <strong>Quien lo tiene:</strong>{" "}
+                  {(extra.block_a_extra as Record<string, string>).who_has_it}
+                </p>
               ) : null}
             </div>
           ) : null}
@@ -188,17 +136,20 @@ export default function InitiativeDetailPage() {
             <strong>Duda principal:</strong> {initiative.main_doubt || "—"}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Condicion clave:</strong> {initiative.key_condition || "—"}
+            <strong>Condicion clave:</strong>{" "}
+            {initiative.key_condition || "—"}
           </p>
           <Badge label="Captura de valor" value={initiative.value_capture} />
         </InfoCard>
 
         <InfoCard title="Hitos">
           <p className="text-xs text-gray-700">
-            <strong>Tecnicos:</strong> {initiative.technical_milestones || "—"}
+            <strong>Tecnicos:</strong>{" "}
+            {initiative.technical_milestones || "—"}
           </p>
           <p className="text-xs text-gray-700">
-            <strong>Economicos:</strong> {initiative.financial_milestones || "—"}
+            <strong>Economicos:</strong>{" "}
+            {initiative.financial_milestones || "—"}
           </p>
           <div className="mt-1">
             <Badge
@@ -213,7 +164,7 @@ export default function InitiativeDetailPage() {
         </InfoCard>
       </div>
 
-      {/* DBI original (collapsible) */}
+      {/* DBI original */}
       {initiative.dbi_raw_text && (
         <details className="rounded border bg-white p-3">
           <summary className="text-sm font-medium text-gray-600 cursor-pointer">

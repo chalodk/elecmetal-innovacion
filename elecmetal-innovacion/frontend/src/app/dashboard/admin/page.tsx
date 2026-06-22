@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import {
-  listInitiatives,
-  updateInitiativeStatus,
-  triggerEvaluation,
-} from "@/lib/api";
+  useInitiatives,
+  useUpdateInitiativeStatus,
+  useTriggerEvaluation,
+} from "@/lib/hooks";
 import { StatusBadge } from "@/components/ui";
 
 interface Initiative {
@@ -41,73 +40,31 @@ const TABS = [
 
 export default function AdminPage() {
   const router = useRouter();
-  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: initiatives = [],
+    isLoading: loading,
+    error: loadError,
+    refetch,
+  } = useInitiatives();
+  const updateStatus = useUpdateInitiativeStatus();
+  const activateEvaluator = useTriggerEvaluation();
   const [activeTab, setActiveTab] = useState("notificado");
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push("/login"); return; }
-      const data = await listInitiatives(session.access_token);
-      // Handle paginated envelope vs raw array
-      setInitiatives(Array.isArray(data) ? data : (data.data || []));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
+  const filtered =
+    activeTab === "all"
+      ? initiatives
+      : initiatives.filter((i: Initiative) => i.status === activeTab);
 
-  useEffect(() => { load(); }, [load]);
+  const error =
+    (loadError as Error)?.message ||
+    (updateStatus.error as Error)?.message ||
+    (activateEvaluator.error as Error)?.message ||
+    null;
 
-  const filtered = activeTab === "all"
-    ? initiatives
-    : initiatives.filter((i) => i.status === activeTab);
-
-  // ── Actions ───────────────────────────────────────────────────────────
-
-  const handleMoveToEvaluation = async (initiativeId: number) => {
-    setActionLoading(initiativeId);
-    setError(null);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      await updateInitiativeStatus(
-        session.access_token, String(initiativeId), "en_evaluacion",
-      );
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleTriggerEvaluator = async (initiativeId: number) => {
-    setActionLoading(initiativeId);
-    setError(null);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      await triggerEvaluation(session.access_token, String(initiativeId));
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const actionLoading =
+    updateStatus.isPending || activateEvaluator.isPending;
 
   // ── Render ────────────────────────────────────────────────────────────
-
   if (loading) {
     return (
       <div className="flex items-center justify-center flex-1">
@@ -123,7 +80,7 @@ export default function AdminPage() {
           Panel de Directora
         </h1>
         <button
-          onClick={load}
+          onClick={() => refetch()}
           className="text-xs text-blue-600 hover:underline"
         >
           Refrescar
@@ -133,9 +90,12 @@ export default function AdminPage() {
       {/* Tabs */}
       <div className="flex gap-1 border-b pb-0">
         {TABS.map((tab) => {
-          const count = tab.key === "all"
-            ? initiatives.length
-            : initiatives.filter((i) => i.status === tab.key).length;
+          const count =
+            tab.key === "all"
+              ? initiatives.length
+              : initiatives.filter(
+                  (i: Initiative) => i.status === tab.key,
+                ).length;
           return (
             <button
               key={tab.key}
@@ -173,7 +133,7 @@ export default function AdminPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((init) => (
+          {filtered.map((init: Initiative) => (
             <div
               key={init.id}
               className="rounded-lg border bg-white p-4 hover:shadow-sm transition-shadow"
@@ -208,23 +168,28 @@ export default function AdminPage() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {init.status === "notificado" && (
                     <button
-                      onClick={() => handleMoveToEvaluation(init.id)}
-                      disabled={actionLoading === init.id}
+                      onClick={() =>
+                        updateStatus.mutate({
+                          initiativeId: String(init.id),
+                          status: "en_evaluacion",
+                        })
+                      }
+                      disabled={actionLoading}
                       className="px-2.5 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50 transition-colors"
                     >
-                      {actionLoading === init.id
-                        ? "…"
-                        : "Enviar a evaluacion"}
+                      {updateStatus.isPending ? "…" : "Enviar a evaluacion"}
                     </button>
                   )}
 
                   {init.status === "en_evaluacion" && (
                     <button
-                      onClick={() => handleTriggerEvaluator(init.id)}
-                      disabled={actionLoading === init.id}
+                      onClick={() =>
+                        activateEvaluator.mutate(String(init.id))
+                      }
+                      disabled={actionLoading}
                       className="px-2.5 py-1 text-xs font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors"
                     >
-                      {actionLoading === init.id
+                      {activateEvaluator.isPending
                         ? "Evaluando…"
                         : "Activar Evaluador"}
                     </button>
