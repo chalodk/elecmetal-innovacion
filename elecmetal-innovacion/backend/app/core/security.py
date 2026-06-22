@@ -126,3 +126,51 @@ async def require_directora(user: dict) -> str:
                 message="Solo directora o admin pueden realizar esta accion",
             )
     return user_id
+
+
+def require_role(*roles: str):
+    """Fabrica de dependencia: valida que el usuario tenga uno de los roles dados.
+
+    Uso:
+        @router.get("/admin")
+        async def admin_endpoint(user: dict = Depends(require_role("directora", "admin"))):
+            ...
+
+    Retorna un dict con "sub" (UUID), "role" (str), "full_name" (str).
+    Lanza AppError 403 si el usuario no tiene el rol requerido.
+    """
+
+    async def _check_role(
+        current_user: dict = Depends(get_current_user),
+    ) -> dict:
+        from app.core.database import get_pool
+
+        user_id = require_user_id(current_user)
+
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT role, full_name FROM profiles WHERE id = $1",
+                user_id,
+            )
+
+        if row is None:
+            raise AppError(
+                code=ErrorCode.FORBIDDEN,
+                message="Perfil no encontrado",
+            )
+
+        user_role = row["role"]
+        if user_role not in roles:
+            raise AppError(
+                code=ErrorCode.FORBIDDEN,
+                message=f"Se requiere rol: {', '.join(roles)}",
+            )
+
+        return {
+            "sub": user_id,
+            "role": user_role,
+            "full_name": row["full_name"],
+        }
+
+    return _check_role

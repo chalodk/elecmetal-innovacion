@@ -6,9 +6,9 @@ node_modules/
 # Build
 frontend/.next/
 frontend/out/
-backend/__pycache__/
-backend/*.pyc
-backend/.mypy_cache/
+__pycache__/
+*.pyc
+.mypy_cache/
 
 # Env
 .env

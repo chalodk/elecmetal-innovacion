@@ -16,6 +16,7 @@ from app.core.errors import (
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from app.api.v1 import sessions, initiatives, notifications, evaluations
 from app.api.v1.health import router as health_router
+from app.api.v1.me import router as me_router
 from app.api.v1.users import router as users_router
 
 log = structlog.get_logger()
@@ -55,6 +56,7 @@ app.add_middleware(
 
 # ─── Routers ────────────────────────────────────────────────────────────────
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(me_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 
 app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
