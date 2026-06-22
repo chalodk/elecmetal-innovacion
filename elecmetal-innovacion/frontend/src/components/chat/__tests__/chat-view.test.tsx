@@ -1,4 +1,4 @@
-// @ts-nocheck — mock typing issues (Diego B2, pre-existing)
+// @ts-nocheck
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import ChatView from "../chat-view";

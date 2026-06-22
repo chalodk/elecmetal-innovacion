@@ -1,4 +1,3 @@
-// @ts-nocheck — MSW mock handlers (Diego B1/B2/B3)
 import { http, HttpResponse, delay } from "msw";
 
 const API_URL = "http://localhost:8000";
@@ -24,7 +23,7 @@ function tokenize(text: string): string[] {
 function createSSEResponse(
   tokens: string[],
   simulateErrorAfter?: number,
-): HttpResponse {
+) {
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -442,6 +441,7 @@ export const handlers = [
     const data = filtered.slice(0, limit);
 
     return HttpResponse.json({
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       data: data.map(({ evaluation, ...rest }) => rest),
       pagination: {
         next_cursor: data.length > 0 ? data[data.length - 1].id : null,

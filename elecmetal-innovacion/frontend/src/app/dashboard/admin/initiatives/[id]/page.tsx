@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useInitiative } from "@/hooks/use-initiative";
 import {
@@ -71,7 +71,6 @@ function formatDate(dateStr: string | null): string {
 
 export default function InitiativeDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = Number(params.id);
 
   const {
