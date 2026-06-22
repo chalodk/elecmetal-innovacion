@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchMessages, sendMessage } from "@/lib/api";
+import { fetchMessages, postMessage } from "@/lib/api";
 import { getAccessToken } from "@/lib/get-token";
 import type { Message } from "@/lib/types";
 
@@ -25,7 +25,7 @@ export function useSendMessage(sessionId: number) {
   return useMutation({
     mutationFn: async (content: string) => {
       const token = await getAccessToken();
-      return sendMessage(token, sessionId, content);
+      return postMessage(token, sessionId, content);
     },
     onSuccess: (data) => {
       queryClient.setQueryData<Message[]>(

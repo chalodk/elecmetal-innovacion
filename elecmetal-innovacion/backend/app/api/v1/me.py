@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from app.core.database import get_pool
-from app.core.security import get_current_user
+from app.core.errors import AppError, ErrorCode
+from app.core.security import get_current_user, require_user_id
 
 router = APIRouter()
 
@@ -9,6 +10,8 @@ router = APIRouter()
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
     """Devuelve el perfil del usuario autenticado desde la tabla profiles."""
+    user_id = require_user_id(user)
+
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -18,18 +21,13 @@ async def get_me(user: dict = Depends(get_current_user)):
             FROM profiles
             WHERE id = $1::uuid
             """,
-            user["sub"],
+            user_id,
         )
 
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": {
-                    "code": "PROFILE_NOT_FOUND",
-                    "message": "No se encontró el perfil del usuario",
-                }
-            },
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message="No se encontro el perfil del usuario",
         )
 
     return {

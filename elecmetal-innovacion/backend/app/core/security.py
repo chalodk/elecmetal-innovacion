@@ -118,7 +118,8 @@ async def require_directora(user: dict) -> str:
     pool = get_pool()
     async with pool.acquire() as conn:
         profile = await conn.fetchrow(
-            f"SELECT role FROM profiles WHERE id = '{user_id}'"
+            "SELECT role FROM profiles WHERE id = $1",
+            user_id,
         )
         if not profile or profile["role"] not in ("directora", "admin"):
             raise AppError(

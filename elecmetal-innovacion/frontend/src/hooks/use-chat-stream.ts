@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/get-token";
-import { sendMessage } from "@/lib/api";
+import { postMessage } from "@/lib/api";
 import { createSSEStream } from "@/lib/sse-client";
 import { MESSAGES_KEY } from "@/hooks/use-messages";
 import type { Message } from "@/lib/types";
@@ -170,7 +170,7 @@ export function useChatStream(sessionId: number): UseChatStreamReturn {
         const token = await getAccessToken();
 
         // Enviar al backend en segundo plano (persiste user + placeholder)
-        const response = await sendMessage(token, sessionId, content);
+        const response = await postMessage(token, sessionId, content);
 
         // Reemplazar el mensaje optimista con el real del backend
         queryClient.setQueryData<Message[]>(

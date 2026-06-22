@@ -216,3 +216,57 @@ export async function sendMessage(
 
   return { content: fullContent, message_id: messageId, initiative };
 }
+
+// ── Diego-compatible aliases (B1/B2/B3 hooks) ───────────────────────────────
+
+/** Alias for listSessions returning paginated envelope format. */
+export async function fetchSessions(token: string) {
+  const data = await listSessions(token);
+  return { data: Array.isArray(data) ? data : (data.data || []) };
+}
+
+/** Get a single session by ID. */
+export async function fetchSession(token: string, id: number) {
+  return authFetch(token, `/api/v1/sessions/${id}`);
+}
+
+/** Paginated messages — Diego-compatible signature. */
+export async function fetchMessages(
+  token: string,
+  sessionId: number,
+  opts?: { limit?: number; cursor?: number },
+) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", String(opts.cursor));
+  return authFetch(token, `/api/v1/sessions/${sessionId}/messages?${params.toString()}`);
+}
+
+/** Filtered initiative list — Diego-compatible signature. */
+export async function fetchInitiatives(
+  token: string,
+  params?: { status?: string; cursor?: number; limit?: number },
+) {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set("status", params.status);
+  if (params?.cursor) sp.set("cursor", String(params.cursor));
+  if (params?.limit) sp.set("limit", String(params.limit));
+  return authFetch(token, `/api/v1/initiatives?${sp.toString()}`);
+}
+
+/** Single initiative — Diego-compatible alias for getInitiative. */
+export async function fetchInitiative(token: string, id: number) {
+  return authFetch(token, `/api/v1/initiatives/${id}`);
+}
+
+/** Plain POST to send a message (no SSE). Returns {user_message, assistant_message?}. */
+export async function postMessage(
+  token: string,
+  sessionId: number,
+  content: string,
+) {
+  return authFetch(token, `/api/v1/sessions/${sessionId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
