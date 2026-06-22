@@ -1,4 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { server } from "@/test/mocks/server";
+
+// MSW intercepta fetch a bajo nivel — lo detenemos para tests que mockean fetch manualmente
+beforeAll(() => server.close());
+afterAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 
 // Mock fetch globally
 const mockFetch = vi.fn();

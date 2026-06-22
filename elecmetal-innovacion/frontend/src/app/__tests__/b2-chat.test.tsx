@@ -1,10 +1,15 @@
 /**
- * B2 tests - UI de chat + streaming SSE.
+ * B2 tests — Chat page unificada (ChatView wrapper).
+ * MSW se detiene porque estos tests mockean fetch manualmente.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { getQueryClient } from "@/lib/query-client";
+import { server } from "@/test/mocks/server";
+
+beforeAll(() => server.close());
+afterAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -25,6 +30,7 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
+/** IMPORTANTE: patterns más específicos primero. /sessions/1 capturaría /sessions/1/messages si va antes. */
 function mockUrls(routes: Record<string, { data: unknown; ok?: boolean }>) {
   mockFetch.mockImplementation(async (url: string) => {
     for (const [pattern, resp] of Object.entries(routes)) {
@@ -43,10 +49,11 @@ describe("B2 | Chat page", () => {
 
   it("renderiza historial de mensajes", async () => {
     mockUrls({
-      "/messages": { data: { data: [
+      "/sessions/1/messages": { data: { data: [
         { id: 1, session_id: 1, role: "user", content: "Hola Clara", metadata: null, created_at: "2026-01-01T00:00:00" },
         { id: 2, session_id: 1, role: "assistant", content: "Hola! Soy Clara.", metadata: null, created_at: "2026-01-01T00:00:01" },
       ], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1": { data: { id: 1, user_id: "u1", agent_type: "clara", status: "active", title: "Test", started_at: "2026-01-01T00:00:00", ended_at: null, created_at: "2026-01-01T00:00:00", updated_at: "2026-01-01T00:00:00" } },
     });
 
     render(<ChatPage />, { wrapper: TestWrapper });
@@ -57,17 +64,19 @@ describe("B2 | Chat page", () => {
 
   it("muestra placeholder sin mensajes", async () => {
     mockUrls({
-      "/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1": { data: { id: 1, user_id: "u1", agent_type: "clara", status: "active", title: "Test", started_at: "2026-01-01T00:00:00", ended_at: null, created_at: "2026-01-01T00:00:00", updated_at: "2026-01-01T00:00:00" } },
     });
 
     render(<ChatPage />, { wrapper: TestWrapper });
 
-    await waitFor(() => { expect(screen.getByText(/Envia tu primer mensaje/)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/No hay mensajes/)).toBeInTheDocument(); });
   });
 
   it("input vacio deshabilita boton Enviar", async () => {
     mockUrls({
-      "/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1": { data: { id: 1, user_id: "u1", agent_type: "clara", status: "active", title: "Test", started_at: "2026-01-01T00:00:00", ended_at: null, created_at: "2026-01-01T00:00:00", updated_at: "2026-01-01T00:00:00" } },
     });
 
     render(<ChatPage />, { wrapper: TestWrapper });
@@ -78,7 +87,8 @@ describe("B2 | Chat page", () => {
 
   it("habilita boton al escribir", async () => {
     mockUrls({
-      "/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1/messages": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/sessions/1": { data: { id: 1, user_id: "u1", agent_type: "clara", status: "active", title: "Test", started_at: "2026-01-01T00:00:00", ended_at: null, created_at: "2026-01-01T00:00:00", updated_at: "2026-01-01T00:00:00" } },
     });
 
     render(<ChatPage />, { wrapper: TestWrapper });
@@ -88,25 +98,8 @@ describe("B2 | Chat page", () => {
     expect(screen.getByRole("button", { name: /Enviar/ })).not.toBeDisabled();
   });
 
-  it("muestra error si falla carga", async () => {
-    mockUrls({
-      "/messages": { data: { error: { message: "Sesion no encontrada" } }, ok: false },
-    });
-
-    render(<ChatPage />, { wrapper: TestWrapper });
-
-    await waitFor(
-      () => { expect(screen.getByText(/Error al cargar la sesion/)).toBeInTheDocument(); },
-      { timeout: 5000 },
-    );
-    expect(screen.getByText("Sesion no encontrada")).toBeInTheDocument();
-  });
-
-  it("muestra carga al iniciar", () => {
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-    render(<ChatPage />, { wrapper: TestWrapper });
-    expect(screen.getByText(/Cargando conversacion/)).toBeInTheDocument();
-  });
+  // NOTA: error de sesion 404/403 y loading skeleton estan cubiertos por
+  // chat-view.test.tsx (Diego, 11 tests). Ver esos tests para esos casos.
 });
 
 describe("B2 | SSE parsing", () => {

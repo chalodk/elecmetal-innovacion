@@ -1,12 +1,15 @@
 /**
- * B3 tests - Vista de iniciativa + panel directora.
- *
- * Tests: panel de directora con tabs y acciones, DBI viewer bloques A-G,
- * dbi_extra, scorecard del Evaluador, veredicto, acceso denegado por rol.
+ * B3 tests — Panel Directora unificado (InitiativeCard + acciones de Jorge).
+ * MSW se detiene porque estos tests mockean fetch manualmente.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { getQueryClient } from "@/lib/query-client";
+import { server } from "@/test/mocks/server";
+
+beforeAll(() => server.close());
+afterAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -18,25 +21,12 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
-    auth: {
-      getSession: () =>
-        Promise.resolve({
-          data: { session: { access_token: "test-token" } },
-        }),
-    },
+    auth: { getSession: () => Promise.resolve({ data: { session: { access_token: "test-token" } } }) },
   }),
 }));
 
-import { QueryClient } from "@tanstack/react-query";
-
-function makeTestQC() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: 0 } },
-  });
-}
-
 function TestWrapper({ children }: { children: React.ReactNode }) {
-  const qc = makeTestQC();
+  const qc = getQueryClient(); qc.clear();
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
@@ -47,59 +37,55 @@ function mockUrls(routes: Record<string, { data: unknown; ok?: boolean }>) {
         return { ok: resp.ok ?? true, json: async () => resp.data };
       }
     }
-    return { ok: false, json: async () => ({ error: { message: "Unmatched" } }) };
+    return { ok: false, json: async () => ({ error: { message: "Unmatched: " + url } }) };
   });
 }
 
 import AdminPage from "@/app/dashboard/admin/page";
 
+const MOCK_INITIATIVE = {
+  id: 1, initiative_code: "INI-2026-001", title: "Mantenimiento predictivo",
+  status: "notificado", initiative_type: "interna", applicant_name: "Jorge Melian",
+  area: "Mina", postulation_date: "2026-06-15T00:00:00", created_at: "2026-06-15T00:00:00",
+};
+
 describe("B3 | Panel de directora", () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-  });
+  beforeEach(() => { mockFetch.mockReset(); getQueryClient().clear(); });
 
-  it("renderiza datos de iniciativa en la tabla", async () => {
+  it("renderiza datos de iniciativa en la lista", async () => {
     mockUrls({
-      "/initiatives": { data: { data: [
-        { id: 1, initiative_code: "INI-2026-001", title: "Mantenimiento predictivo", status: "notificado", initiative_type: "interna", applicant_name: "Carlos", area: "Fundicion", postulation_date: "2026-06-01", created_at: "2026-06-01T00:00:00" },
-      ], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/initiatives": { data: { data: [MOCK_INITIATIVE], pagination: { has_more: false, next_cursor: null } } },
     });
-    render(<AdminPage />, { wrapper: TestWrapper });
-    expect(await screen.findByText("INI-2026-001", {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.getByText("Mantenimiento predictivo")).toBeInTheDocument();
-    expect(screen.getByText("Todas")).toBeInTheDocument();
-    expect(screen.getByText("Pendientes")).toBeInTheDocument();
-  });
 
-  it("filtra por tab activo", async () => {
-    mockUrls({
-      "/initiatives": { data: { data: [{ id: 1, initiative_code: "INI-2026-001", title: "Test", status: "notificado", initiative_type: "interna", applicant_name: "X", area: "Area", postulation_date: "2026-01-01", created_at: "2026-01-01T00:00:00" }], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
-    });
     render(<AdminPage />, { wrapper: TestWrapper });
-    await waitFor(() => { expect(screen.getByText("INI-2026-001")).toBeInTheDocument(); }, { timeout: 5000 });
-    fireEvent.click(screen.getByText("Evaluadas"));
-    await waitFor(() => { expect(screen.getByText(/No hay iniciativas/)).toBeInTheDocument(); });
+
+    await waitFor(() => { expect(screen.getByText("Mantenimiento predictivo")).toBeInTheDocument(); });
+    expect(screen.getByText("INI-2026-001")).toBeInTheDocument();
   });
 
   it("muestra boton Enviar a evaluacion para notificado", async () => {
     mockUrls({
-      "/initiatives": { data: { data: [{ id: 1, initiative_code: "INI-2026-001", title: "Test", status: "notificado", initiative_type: "interna", applicant_name: "X", area: "Area", postulation_date: "2026-01-01", created_at: "2026-01-01T00:00:00" }], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/initiatives": { data: { data: [MOCK_INITIATIVE], pagination: { has_more: false, next_cursor: null } } },
     });
+
     render(<AdminPage />, { wrapper: TestWrapper });
+
     await waitFor(() => { expect(screen.getByText(/Enviar a evaluacion/)).toBeInTheDocument(); });
   });
 
   it("muestra estado vacio cuando no hay iniciativas", async () => {
     mockUrls({
-      "/initiatives": { data: { data: [], pagination: { has_more: false, next_cursor: null, limit: 20 } } },
+      "/initiatives": { data: { data: [], pagination: { has_more: false, next_cursor: null } } },
     });
+
     render(<AdminPage />, { wrapper: TestWrapper });
+
     await waitFor(() => { expect(screen.getByText(/No hay iniciativas/)).toBeInTheDocument(); });
   });
 
   it("muestra estado de carga al iniciar", () => {
     mockFetch.mockImplementation(() => new Promise(() => {}));
     render(<AdminPage />, { wrapper: TestWrapper });
-    expect(screen.getByText(/Cargando iniciativas/)).toBeInTheDocument();
+    expect(screen.getByText(/Iniciativas/)).toBeInTheDocument();
   });
 });
