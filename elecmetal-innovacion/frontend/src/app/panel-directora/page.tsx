@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useInitiatives } from "@/hooks/use-initiatives";
 import InitiativeCard from "@/components/panel-directora/initiative-card";
-import type { InitiativeStatus } from "@/lib/types";
+import type { InitiativeStatus, Initiative } from "@/lib/types";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Todas" },
@@ -100,7 +100,7 @@ export default function PanelDirectoraPage() {
       {!isLoading && !isError && data?.data && data.data.length > 0 && (
         <>
           <div className="space-y-3">
-            {data.data.map((initiative) => (
+            {data.data.map((initiative: Initiative) => (
               <InitiativeCard
                 key={initiative.id}
                 initiative={initiative}

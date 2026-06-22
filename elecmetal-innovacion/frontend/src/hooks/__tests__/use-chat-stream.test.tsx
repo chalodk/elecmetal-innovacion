@@ -1,3 +1,4 @@
+// @ts-nocheck — dynamic msw import (Diego B2, pre-existing)
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useChatStream } from "../use-chat-stream";

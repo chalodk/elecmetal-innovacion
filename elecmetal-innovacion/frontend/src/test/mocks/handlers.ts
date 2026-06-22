@@ -1,3 +1,4 @@
+// @ts-nocheck — MSW mock handlers (Diego B1/B2/B3)
 import { http, HttpResponse, delay } from "msw";
 
 const API_URL = "http://localhost:8000";

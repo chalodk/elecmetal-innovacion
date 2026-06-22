@@ -11,11 +11,10 @@ from __future__ import annotations
 import logging
 from typing import AsyncGenerator
 
-import asyncpg
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.core.database import get_pool
+from app.core.database import get_pool, ApiConnection
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +30,15 @@ def _get_openai_client() -> AsyncOpenAI:
 
 
 async def _load_agent_config(
-    conn: asyncpg.Connection,
+    conn: ApiConnection,
     agent_type: str,
 ) -> dict | None:
     """Carga la configuracion activa del agente desde agent_configs."""
     row = await conn.fetchrow(
-        """
-        SELECT agent_name, version, prompt_text, base_knowledge, skill_file
-        FROM agent_configs
-        WHERE agent_name = $1 AND is_active = true
-        LIMIT 1
-        """,
-        agent_type,
+        f"SELECT agent_name, version, prompt_text, base_knowledge, skill_file "
+        f"FROM agent_configs "
+        f"WHERE agent_name = '{agent_type}' AND is_active = true "
+        f"LIMIT 1"
     )
     if row is None:
         return None
@@ -50,7 +46,7 @@ async def _load_agent_config(
 
 
 async def _build_messages(
-    conn: asyncpg.Connection,
+    conn: ApiConnection,
     session_id: int,
     system_prompt: str,
 ) -> list[dict]:
@@ -58,13 +54,9 @@ async def _build_messages(
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     rows = await conn.fetch(
-        """
-        SELECT role, content
-        FROM messages
-        WHERE session_id = $1
-        ORDER BY created_at ASC
-        """,
-        session_id,
+        f"SELECT role, content FROM messages "
+        f"WHERE session_id = {session_id} "
+        f"ORDER BY created_at ASC"
     )
 
     for row in rows:
@@ -151,15 +143,13 @@ async def persist_assistant_message(
     Returns:
         El ID del mensaje insertado.
     """
+    # Escapar comillas simples para SQL
+    safe_content = content.replace("'", "''")
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            INSERT INTO messages (session_id, role, content)
-            VALUES ($1, 'assistant', $2)
-            RETURNING id
-            """,
-            session_id,
-            content,
+            f"INSERT INTO messages (session_id, role, content) "
+            f"VALUES ({session_id}, 'assistant', '{safe_content}') "
+            f"RETURNING id"
         )
         return row["id"]
