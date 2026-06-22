@@ -1,0 +1,229 @@
+================================================================================
+                    5W+H — PLATAFORMA DE INNOVACIÓN ELECMETAL
+                       Marco de referencia para cada update
+================================================================================
+
+Última actualización: 2026-06-11
+Repositorio: https://github.com/diegoestadistico14-lang/elecmetal-innovacion.git
+
+
+1. WHAT — ¿Qué estamos construyendo?
+================================================================================
+
+Una plataforma conversacional donde trabajadores de ME Elecmetal postulan
+iniciativas de innovación guiados por agentes de inteligencia artificial.
+
+Componentes principales:
+
+  A) Clara (GPT v5.4) — Asistente conversacional que guía al postulante bloque
+     por bloque (A–G) hasta generar un Documento Base de Iniciativa (DBI)
+     completo con 25 campos estructurados.
+
+  B) Analista de Oportunidad (v2) — Agente independiente que recibe 6 campos
+     y ejecuta una máquina de estados (A–L) para calcular TAM/SAM/SOM a año 5
+     en USD nominal, con trazabilidad DATO/SUPUESTO/DERIVADO.
+
+  C) Evaluador — Agente batch que recibe el DBI completo y genera columnas
+     26–38 (resultados flexibles en JSONB) para apoyar la decisión del comité.
+
+  D) Panel de Directora — Vista administrativa donde la directora de innovación
+     revisa postulaciones, activa al Evaluador, ajusta resultados y registra
+     el veredicto final del Deomite (comité).
+
+Stack técnico:
+  - Frontend:  Next.js 14+ (App Router, Tailwind CSS, TypeScript estricto)
+  - Backend:   FastAPI 0.110+ (Python 3.11+, async/await, Pydantic v2)
+  - Base datos: PostgreSQL 15+ vía Supabase (auth + datos)
+  - Auth:      Supabase Auth (Google OAuth + Magic Link)
+  - Agentes IA: OpenAI GPT-4o (Custom GPTs versionados)
+  - Migraciones: Goose v3+
+  - Email:     Resend o SendGrid
+
+
+2. WHY — ¿Por qué existe este proyecto?
+================================================================================
+
+Problema que resuelve:
+  Los trabajadores de Elecmetal tienen ideas de innovación pero no saben cómo
+  estructurarlas para que el comité (Deomite) las evalúe. El proceso tradicional
+  es lento, requiere acompañamiento humano intensivo, y muchas ideas se pierden
+  porque el postulante no maneja metodologías de innovación.
+
+Valor que entrega:
+  - Democratiza la postulación: cualquier trabajador puede postular sin saber
+    de innovación. Clara traduce su conocimiento tácito a un DBI estructurado.
+  - Estandariza la evaluación: todas las iniciativas llegan con el mismo formato,
+    permits comparación objetiva por parte del comité.
+  - Trazabilidad y auditoría: cada agente tiene versión, cada cálculo está
+    etiquetado (DATO/SUPUESTO/DERIVADO), cada decisión queda registrada.
+  - Escala sin fricción: el equipo de innovación puede manejar más postulaciones
+    sin aumentar headcount, porque Clara y el Analista hacen el trabajo pesado
+    de estructuración.
+
+
+3. WHO — ¿Quiénes son los actores?
+================================================================================
+
+Roles del sistema (RBAC simple, tabla profiles.role):
+
+  a) Postulante — Cualquier trabajador de Elecmetal que tiene una idea.
+     - Se registra con Google OAuth o Magic Link.
+     - Habla con Clara para estructurar su iniciativa (bloques A–G).
+     - Puede usar el Analista de Oportunidad para dimensionar el mercado.
+     - Recibe mail de confirmación con su código de iniciativa.
+     - Rol default al registrarse.
+
+  b) Directora de Innovación — Revisa, evalúa, prioriza.
+     - Ve todas las iniciativas postuladas en el panel admin.
+     - Revisa preliminarmente y decide cuáles merecen evaluación formal.
+     - Activa al Evaluador (solo ella puede).
+     - Revisa y ajusta resultados del Evaluador.
+     - Registra el veredicto final del Deomite (aprobada/rechazada/pendiente).
+
+  c) Admin — Soporte técnico y configuración.
+     - Promueve usuarios a directora/admin.
+     - Gestiona versiones de agentes en agent_configs.
+     - No participa en el flujo de negocio.
+
+  d) Deomite (Comité) — Fuera del sistema.
+     - Toma la decisión final sobre cada iniciativa.
+     - La plataforma solo registra el resultado, no automatiza la decisión.
+
+Agentes IA (no son usuarios, son herramientas):
+  - Clara v5.4 — Guía de postulación (conversacional, streaming).
+  - Analista de Oportunidad v2 — Dimensionamiento de mercado (conversacional).
+  - Evaluador v1 — Evaluación batch de iniciativas.
+
+
+4. WHEN — ¿Cuándo y en qué orden ocurren las cosas?
+================================================================================
+
+Flujo de principio a fin (12 pasos del Boot Sequence):
+
+  FASE 0 — Infraestructura (Paso 1)
+    - Proyecto Supabase, Google OAuth, migración inicial (7 tablas, 3 seeds).
+
+  FASE 1 — Plataforma base (Pasos 2-5)
+    - Backend scaffold (FastAPI + asyncpg + JWT).
+    - Autenticación (Supabase Auth → JWT → GET /me).
+    - Frontend scaffold (Next.js + Supabase client + layouts auth/dashboard).
+    - Chat mínimo (sessions + messages, respuesta placeholder sin IA).
+
+  FASE 2 — Clara y DBI (Pasos 6-8)
+    - Integrar Clara: streaming SSE, una pregunta por turno, bloques A–G.
+    - Parseo DBI: extraer 25 campos, INSERT en initiatives, status = 'persistido'.
+    - Notificaciones: mail al postulante + aviso a directora.
+
+  FASE 3 — Evaluación y decisión (Pasos 9-10)
+    - Directora activa Evaluador → resultados en JSONB.
+    - Directora revisa, ajusta, valida.
+    - Panel admin: veredicto del Deomite (aprobada/rechazada/pendiente).
+
+  FASE 4 — Analista y pulido (Pasos 11-12)
+    - Analista de Oportunidad independiente (6 campos → TAM/SAM/SOM).
+    - Paginación, filtros, testing, CI/CD, deploy a producción.
+
+Máquina de estados de una iniciativa:
+  dbi_generado → persistido → notificado → en_evaluacion → evaluado
+  → validado → veredicto
+
+
+5. WHERE — ¿Dónde opera y dónde se despliega?
+================================================================================
+
+Geografía: Chile (UTC-4/UTC-3). Todas las fechas usan TIMESTAMPTZ.
+
+Infraestructura:
+  - Producción: Supabase (PostgreSQL + Auth), Vercel (frontend), Railway/Fly.io
+    (backend FastAPI), OpenAI API (agentes).
+  - Desarrollo: localhost. Frontend en :3000, backend en :8000.
+  - Migraciones: Goose corre local o en CI/CD contra la DB de cada ambiente.
+  - Email: Resend o SendGrid para notificaciones transaccionales.
+
+Entorno del usuario:
+  - Web browser (desktop y mobile). Next.js App Router con layouts anidados.
+  - Autenticación vía Google OAuth (cuenta corporativa Elecmetal) o Magic Link.
+
+
+6. HOW — ¿Cómo se construye y bajo qué reglas?
+================================================================================
+
+6.1. Principios de arquitectura
+
+  a) Separación agente ↔ plataforma: Los prompts y skills de los agentes IA
+     viven en agent_configs (versionados) y en la carpeta skills/. Cambiar un
+     prompt no requiere tocar código. Solo una versión activa por agente.
+
+  b) DB como fuente de verdad: Constraints con nombre explícito, CHECKs para
+     listas controladas (TRL, CRL, BRL, escalabilidad, horizonte, value_capture),
+     FKs con ON DELETE explícito. La DB es la última línea de defensa.
+
+  c) Sessions genéricas: Clara y Analista comparten la misma estructura
+     sessions/messages. Se diferencian por agent_type. Agregar un nuevo agente
+     conversacional no requiere nueva tabla.
+
+  d) Evaluador flexible: Las columnas 26–38 se guardan como JSONB porque su
+     esquema no está fijo. Cuando se estabilice, se extraen a columnas propias.
+
+  e) Inmutabilidad: Los mensajes (messages) son inmutables una vez creados.
+     Las iniciativas se leen/escriben como unidad (25 campos).
+
+6.2. Reglas de negocio no negociables
+
+  - Clara: UNA pregunta por turno, sin excepciones. Ciclo estricto A→B→C→
+    resumen→opcionales. Bloque D (alineamiento) NO se pregunta al postulante.
+  - Una sola sesión activa con Clara por postulante.
+  - Bloques A, B, C obligatorios. Sin ellos la iniciativa no se considera completa.
+  - B.2 (impacto económico): no se avanza sin al menos un rango. Secuencia de
+    desbloqueo documentada en business-rules.md.
+  - initiative_code autogenerado: formato INI-AAAA-NNN.
+  - Solo la directora activa al Evaluador. No es automático.
+  - Una iniciativa tiene a lo sumo UNA evaluación (1:0..1).
+  - El Analista recibe exactamente 6 campos. Una geografía por cálculo.
+  - Todo output del Analista etiquetado DATO/SUPUESTO/DERIVADO.
+
+6.3. Convenciones de código
+
+  - Dominio en español, código en inglés.
+  - Backend: async/await, SQLAlchemy 2.0 + asyncpg, Pydantic v2, structlog.
+  - Frontend: TypeScript estricto, Server Components por defecto, Tailwind CSS.
+  - Base de datos: tablas plural snake_case, constraints con nombre, queries
+    parametrizadas ($1, $2). Nunca concatenar strings.
+  - API RESTful: /api/v1/, recursos en plural, cursor-based pagination.
+  - Errores: {"error": {"code": "ERROR_CODE", "message": "...", "details": {}}}.
+  - Migraciones Goose: una por cambio, nunca editar migraciones ya aplicadas.
+
+6.4. Estructura del repositorio
+
+  elecmetal-innovacion/
+  ├── docs/context/          ← Módulo de contexto (leer primero)
+  │   ├── CONTEXT.md         ← Boot sequence + routing table
+  │   ├── 5W-H.txt           ← Este archivo
+  │   └── references/
+  │       ├── business-rules.md
+  │       ├── domain-model.md
+  │       └── development-conventions.md
+  ├── frontend/              ← Next.js App Router
+  ├── backend/               ← FastAPI
+  ├── migrations/            ← Goose migrations (.sql)
+  └── skills/                ← Prompts y skills de agentes IA
+
+6.5. Checklist mental para cada update
+
+  Antes de tocar código, preguntate:
+  □ ¿Rompe alguna regla de negocio documentada en business-rules.md?
+  □ ¿Requiere cambio de schema? → nueva migración Goose, nunca editar existente.
+  □ ¿Afecta la máquina de estados de initiatives? → verificar CHECK constraints.
+  □ ¿Toca la interacción de Clara? → el prompt vive en agent_configs y skills/,
+    no en el código.
+  □ ¿Agrega un agente nuevo? → comparte sessions/messages, diferenciar por
+    agent_type.
+  □ ¿Impacta roles o permisos? → RBAC simple (postulante/directora/admin).
+  □ ¿Usa datos de usuario? → el perfil se crea automáticamente vía trigger
+    handle_new_user() en Supabase Auth.
+  □ ¿Afecta al Analista? → 6 campos de entrada, máquina de estados A–L,
+    una geografía por cálculo, etiquetado DATO/SUPUESTO/DERIVADO.
+
+================================================================================
+                               FIN DEL DOCUMENTO
+================================================================================

@@ -61,3 +61,59 @@ async def get_current_user(
 ) -> dict:
     """Dependencia FastAPI: extrae y valida el usuario del token Bearer."""
     return decode_supabase_jwt(credentials.credentials)
+
+
+async def require_role(*roles: str):
+    """Fabrica de dependencia: valida que el usuario tenga uno de los roles dados.
+
+    Uso:
+        @router.get("/admin")
+        async def admin_endpoint(user: dict = Depends(require_role("directora", "admin"))):
+            ...
+
+    Retorna un dict con "sub" (UUID), "role" (str), "full_name" (str).
+    Lanza 403 si el usuario no tiene el rol requerido.
+    """
+
+    async def _check_role(
+        current_user: dict = Depends(get_current_user),
+    ) -> dict:
+        from app.core.database import get_pool
+
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT role, full_name FROM profiles WHERE id = $1",
+                current_user["sub"],
+            )
+
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "PROFILE_NOT_FOUND",
+                        "message": "Perfil no encontrado",
+                    }
+                },
+            )
+
+        user_role = row["role"]
+        if user_role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": f"Se requiere rol: {', '.join(roles)}",
+                    }
+                },
+            )
+
+        return {
+            "sub": current_user["sub"],
+            "role": user_role,
+            "full_name": row["full_name"],
+        }
+
+    return _check_role

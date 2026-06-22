@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import create_pool, close_pool
 from app.api.v1.health import router as health_router
+from app.api.v1.me import router as me_router
+from app.api.v1.sessions import router as sessions_router
 
 log = structlog.get_logger()
 
@@ -38,7 +40,10 @@ app.add_middleware(
 
 # ─── Routers ────────────────────────────────────────────────────────────────
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(me_router, prefix="/api/v1")
+app.include_router(sessions_router, prefix="/api/v1")
 
 # Próximos routers (agregar a medida que se implementen):
-# from app.api.v1 import sessions, initiatives, evaluations
-# app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
+from app.api.v1.initiatives import router as initiatives_router
+app.include_router(initiatives_router, prefix="/api/v1")
+# from app.api.v1 import evaluations
