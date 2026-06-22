@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useInitiative } from "@/hooks/use-initiative";
 import {
-  useInitiative,
   useTriggerEvaluation,
   useEvaluationByInitiative,
   useReviewEvaluation,
-} from "@/lib/hooks";
-import { InfoCard, Badge, ScoreBox } from "@/components/ui";
+} from "@/hooks/use-evaluation";
+import StatusBadge from "@/components/ui/StatusBadge";
+import { ScoreBox } from "@/components/ui";
+import DbiBlockSection from "@/components/panel-directora/dbi-block-section";
 
 interface EvaluationData {
   id: number;
@@ -35,14 +38,6 @@ interface EvaluationData {
   created_at: string;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  persistido: "Persistido",
-  notificado: "Notificado",
-  en_evaluacion: "En evaluacion",
-  evaluado: "Evaluado",
-  validado: "Validado",
-};
-
 const DIMENSION_LABELS: Record<string, string> = {
   problema: "Problema",
   solucion: "Solucion",
@@ -53,15 +48,37 @@ const DIMENSION_LABELS: Record<string, string> = {
   hitos: "Hitos",
 };
 
+const TYPE_LABELS: Record<string, string> = {
+  interna: "Interna",
+  externa: "Externa",
+  mixta: "Mixta",
+};
+
+const SCALABILITY_LABELS: Record<string, string> = {
+  Local: "Local",
+  Interna: "Interna",
+  Externa: "Externa",
+};
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("es-CL", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 export default function InitiativeDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const id = params.id as string;
+  const id = Number(params.id);
 
   const {
     data: initiative,
-    isLoading: loading,
-    error: loadError,
+    isLoading,
+    isError,
+    refetch,
   } = useInitiative(id);
 
   const { data: evaluation } = useEvaluationByInitiative(id);
@@ -71,204 +88,218 @@ export default function InitiativeDetailPage() {
   const [veredicto, setVeredicto] = useState("");
 
   const error =
-    (loadError as Error)?.message ||
     (activateEvaluator.error as Error)?.message ||
     (reviewEval.error as Error)?.message ||
     null;
 
-  if (loading) {
+  // Loading skeleton
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center flex-1">
-        <p className="text-sm text-gray-400">Cargando iniciativa…</p>
+      <div className="animate-pulse space-y-4">
+        <div className="h-8 w-64 rounded bg-gray-200" />
+        <div className="h-4 w-48 rounded bg-gray-200" />
+        <div className="mt-6 space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-32 rounded-lg bg-gray-100" />
+          ))}
+        </div>
       </div>
     );
   }
 
-  if (!initiative) {
+  // Error / not found
+  if (isError || !initiative) {
     return (
-      <div className="flex flex-col items-center justify-center flex-1 gap-3">
-        <p className="text-sm text-red-600">Iniciativa no encontrada</p>
-        <button
-          onClick={() => router.push("/dashboard/admin")}
-          className="text-sm text-blue-600 hover:underline"
+      <div className="space-y-4">
+        <Link
+          href="/dashboard/admin"
+          className="text-sm text-blue-600 hover:text-blue-800"
         >
-          Volver al panel
-        </button>
+          ← Volver a la lista
+        </Link>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-medium text-red-700">
+            Error al cargar la iniciativa.
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-2 text-sm font-medium text-red-600 underline hover:text-red-800"
+          >
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }
 
-  const extra = initiative.dbi_extra as Record<string, unknown> | null;
   const evalData = evaluation as EvaluationData | null;
 
+  // Build DBI block sections
+  const blocks = [
+    {
+      letter: "A",
+      title: "Problema",
+      fields: [
+        { label: "Problema", value: initiative.problem },
+        { label: "Área", value: initiative.area },
+      ],
+      defaultOpen: true,
+    },
+    {
+      letter: "B",
+      title: "Solución",
+      fields: [
+        { label: "Solución propuesta", value: initiative.solution },
+        { label: "Impacto económico", value: initiative.economic_impact },
+        {
+          label: "TRL (Technology Readiness Level)",
+          value: initiative.trl ? `Nivel ${initiative.trl}/9` : null,
+        },
+        {
+          label: "Escalabilidad",
+          value: initiative.scalability
+            ? SCALABILITY_LABELS[initiative.scalability] ?? initiative.scalability
+            : null,
+        },
+      ],
+    },
+    {
+      letter: "C",
+      title: "Cliente",
+      fields: [
+        { label: "Cliente interno", value: initiative.internal_client },
+        { label: "Cliente externo", value: initiative.external_client },
+        {
+          label: "CRL (Customer Readiness Level)",
+          value: initiative.crl ? `Nivel ${initiative.crl}/9` : null,
+        },
+      ],
+    },
+    {
+      letter: "D",
+      title: "Alineamiento Estratégico",
+      fields: [
+        { label: "Alineamiento estratégico", value: initiative.strategic_alignment },
+      ],
+    },
+    {
+      letter: "E",
+      title: "Equipo y Recursos",
+      fields: [
+        { label: "Patrocinador", value: initiative.sponsor },
+        { label: "Equipo interno", value: initiative.internal_team },
+        { label: "Equipo externo", value: initiative.external_team },
+        { label: "Duración estimada", value: initiative.estimated_duration },
+      ],
+    },
+    {
+      letter: "F",
+      title: "Riesgo e Incertidumbre",
+      fields: [
+        { label: "Duda principal", value: initiative.main_doubt },
+        { label: "Condición clave", value: initiative.key_condition },
+        { label: "Captura de valor", value: initiative.value_capture },
+        {
+          label: "BRL (Business Readiness Level)",
+          value: initiative.brl ? `Nivel ${initiative.brl}/9` : null,
+        },
+      ],
+    },
+    {
+      letter: "G",
+      title: "Hitos",
+      fields: [
+        { label: "Hitos técnicos", value: initiative.technical_milestones },
+        { label: "Hitos financieros", value: initiative.financial_milestones },
+        {
+          label: "Horizonte de retorno",
+          value: initiative.return_horizon
+            ? `${initiative.return_horizon} meses`
+            : null,
+        },
+      ],
+    },
+  ];
+
   return (
-    <div className="p-6 space-y-4 max-w-4xl">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/dashboard/admin")}
-          className="text-sm text-gray-400 hover:text-gray-600"
+    <div className="space-y-6">
+      {/* Back link + Actions */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/dashboard/admin"
+          className="text-sm text-blue-600 hover:text-blue-800"
         >
-          ← Panel
-        </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">
-          {initiative.title}
-        </h1>
-        <span className="font-mono text-sm text-gray-400">
-          {initiative.initiative_code}
-        </span>
-      </div>
+          ← Volver a la lista
+        </Link>
 
-      {/* Status */}
-      <div className="flex items-center gap-3">
-        <span className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
-          {STATUS_LABELS[initiative.status] || initiative.status}
-        </span>
-        <span className="text-sm text-gray-500 capitalize">
-          {initiative.initiative_type}
-        </span>
-        <span className="text-sm text-gray-400">
-          {initiative.applicant_name} · {initiative.area}
-        </span>
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-2">
-        {initiative.status === "notificado" && (
-          <button
-            onClick={() => activateEvaluator.mutate(id)}
-            disabled={activateEvaluator.isPending}
-            className="px-3 py-1.5 text-sm font-medium rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50"
-          >
-            {activateEvaluator.isPending
-              ? "Procesando…"
-              : "Enviar a evaluacion"}
-          </button>
-        )}
-        {initiative.status === "en_evaluacion" && (
-          <button
-            onClick={() => activateEvaluator.mutate(id)}
-            disabled={activateEvaluator.isPending}
-            className="px-3 py-1.5 text-sm font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
-          >
-            {activateEvaluator.isPending
-              ? "Evaluando…"
-              : "Activar Evaluador IA"}
-          </button>
-        )}
-      </div>
-
-      {/* DBI Core Info */}
-      <div className="grid grid-cols-2 gap-4">
-        <InfoCard title="Problema (Bloque A)">
-          <p className="text-sm text-gray-700">{initiative.problem}</p>
-          {extra && (
-            <div className="mt-2 space-y-1 text-xs text-gray-500">
-              {(extra.block_a_extra as Record<string, string>)
-                ?.why_it_matters && (
-                <p>
-                  <strong>Por que importa:</strong>{" "}
-                  {(extra.block_a_extra as Record<string, string>).why_it_matters}
-                </p>
-              )}
-              {(extra.block_a_extra as Record<string, string>)?.who_has_it && (
-                <p>
-                  <strong>Quien lo tiene:</strong>{" "}
-                  {(extra.block_a_extra as Record<string, string>).who_has_it}
-                </p>
-              )}
-            </div>
+        {/* Action buttons */}
+        <div className="flex items-center gap-2">
+          {initiative.status === "notificado" && (
+            <button
+              onClick={() => activateEvaluator.mutate(initiative.id)}
+              disabled={activateEvaluator.isPending}
+              className="px-3 py-1.5 text-sm font-medium rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50"
+            >
+              {activateEvaluator.isPending ? "Procesando…" : "Enviar a evaluacion"}
+            </button>
           )}
-        </InfoCard>
-
-        <InfoCard title="Solucion (Bloque B)">
-          <p className="text-sm text-gray-700">{initiative.solution}</p>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <Badge label="TRL" value={initiative.trl} />
-            <Badge label="Escalabilidad" value={initiative.scalability} />
-            {initiative.economic_impact && (
-              <Badge label="Impacto" value={initiative.economic_impact} />
-            )}
-          </div>
-          {extra && (
-            <div className="mt-2 space-y-1 text-xs text-gray-500">
-              {(extra.block_b_extra as Record<string, string>)
-                ?.differentiator_novelty_grade && (
-                <p>
-                  <strong>Novedad:</strong>{" "}
-                  {(extra.block_b_extra as Record<string, string>).differentiator_novelty_grade}
-                </p>
-              )}
-              {(extra.block_b_extra as Record<string, string>)
-                ?.trl_evidence && (
-                <p>
-                  <strong>Evidencia TRL:</strong>{" "}
-                  {(extra.block_b_extra as Record<string, string>).trl_evidence}
-                </p>
-              )}
-            </div>
+          {initiative.status === "en_evaluacion" && (
+            <button
+              onClick={() => activateEvaluator.mutate(initiative.id)}
+              disabled={activateEvaluator.isPending}
+              className="px-3 py-1.5 text-sm font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+            >
+              {activateEvaluator.isPending ? "Evaluando…" : "Activar Evaluador IA"}
+            </button>
           )}
-        </InfoCard>
+        </div>
+      </div>
 
-        <InfoCard title="Cliente (Bloque C)">
-          <p className="text-sm text-gray-700">
-            Interno: {initiative.internal_client || "—"}
-          </p>
-          <p className="text-sm text-gray-700">
-            Externo: {initiative.external_client || "—"}
-          </p>
-          <div className="mt-2">
-            <Badge label="CRL" value={initiative.crl} />
+      {/* Header */}
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm text-gray-400">
+                {initiative.initiative_code}
+              </span>
+              <StatusBadge status={initiative.status} />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {initiative.title}
+            </h1>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
+              <span>{initiative.applicant_name}</span>
+              <span>·</span>
+              <span>{initiative.area}</span>
+              <span>·</span>
+              <span>{formatDate(initiative.postulation_date)}</span>
+              <span>·</span>
+              <span>{TYPE_LABELS[initiative.initiative_type] ?? initiative.initiative_type}</span>
+            </div>
           </div>
-        </InfoCard>
+        </div>
+      </div>
 
-        <InfoCard title="Equipo (Bloque E)">
-          <p className="text-sm text-gray-700">
-            <strong>Interno:</strong> {initiative.internal_team || "—"}
-          </p>
-          <p className="text-sm text-gray-700">
-            <strong>Sponsor:</strong> {initiative.sponsor || "—"}
-          </p>
-          <p className="text-xs text-gray-500">
-            Duracion: {initiative.estimated_duration || "—"}
-          </p>
-        </InfoCard>
+      {/* Error */}
+      {error && (
+        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      )}
 
-        <InfoCard title="Riesgo (Bloque F)">
-          <p className="text-sm text-gray-700">
-            <strong>Duda:</strong> {initiative.main_doubt || "—"}
-          </p>
-          <p className="text-sm text-gray-700">
-            <strong>Condicion:</strong> {initiative.key_condition || "—"}
-          </p>
-          <div className="mt-2">
-            <Badge label="BRL" value={initiative.brl} />
-            <span className="ml-2 text-xs text-gray-500">
-              Captura: {initiative.value_capture || "—"}
-            </span>
-          </div>
-        </InfoCard>
-
-        <InfoCard title="Hitos (Bloque G)">
-          <p className="text-sm text-gray-700">
-            <strong>Tecnicos:</strong>{" "}
-            {initiative.technical_milestones || "—"}
-          </p>
-          <p className="text-sm text-gray-700">
-            <strong>Economicos:</strong>{" "}
-            {initiative.financial_milestones || "—"}
-          </p>
-          <div className="mt-2">
-            <Badge
-              label="Retorno"
-              value={
-                initiative.return_horizon
-                  ? `${initiative.return_horizon} meses`
-                  : "—"
-              }
-            />
-          </div>
-        </InfoCard>
+      {/* DBI Blocks */}
+      <div className="space-y-3">
+        {blocks.map((block) => (
+          <DbiBlockSection
+            key={block.letter}
+            letter={block.letter}
+            title={block.title}
+            fields={block.fields}
+            defaultOpen={block.defaultOpen}
+          />
+        ))}
       </div>
 
       {/* Evaluation Results */}
@@ -363,26 +394,11 @@ export default function InitiativeDetailPage() {
             </h3>
             {evalData.veredicto ? (
               <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-600">
-                  Veredicto actual:
-                </span>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    evalData.veredicto === "aprobada"
-                      ? "bg-green-100 text-green-700"
-                      : evalData.veredicto === "rechazada"
-                        ? "bg-red-100 text-red-700"
-                        : "bg-yellow-100 text-yellow-700"
-                  }`}
-                >
-                  {evalData.veredicto}
-                </span>
+                <span className="text-sm text-gray-600">Veredicto actual:</span>
+                <StatusBadge status={evalData.veredicto} />
                 {evalData.reviewed_at && (
                   <span className="text-xs text-gray-400">
-                    Validado:{" "}
-                    {new Date(evalData.reviewed_at).toLocaleDateString(
-                      "es-CL",
-                    )}
+                    Validado: {new Date(evalData.reviewed_at).toLocaleDateString("es-CL")}
                   </span>
                 )}
               </div>
@@ -417,20 +433,13 @@ export default function InitiativeDetailPage() {
         </div>
       )}
 
-      {/* Error */}
-      {error && (
-        <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Raw DBI text */}
+      {/* DBI Raw Text (collapsible) */}
       {initiative.dbi_raw_text && (
-        <details className="rounded border bg-white p-3">
-          <summary className="text-sm font-medium text-gray-600 cursor-pointer">
-            Texto original del DBI
+        <details className="rounded-lg border border-gray-200 bg-white p-4">
+          <summary className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700">
+            Ver texto original del DBI
           </summary>
-          <pre className="mt-2 text-xs text-gray-500 whitespace-pre-wrap max-h-96 overflow-y-auto">
+          <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap text-xs text-gray-600">
             {initiative.dbi_raw_text}
           </pre>
         </details>

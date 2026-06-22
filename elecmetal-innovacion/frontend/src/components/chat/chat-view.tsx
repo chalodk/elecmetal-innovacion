@@ -8,7 +8,7 @@ import ChatInput from "./chat-input";
 import Link from "next/link";
 
 interface ChatViewProps {
-  sessionId: number;
+  sessionId: number | string;
 }
 
 function agentLabel(type: string): string {

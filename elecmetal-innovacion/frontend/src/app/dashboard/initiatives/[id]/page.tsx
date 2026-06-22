@@ -1,13 +1,13 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useInitiative } from "@/lib/hooks";
+import { useInitiative } from "@/hooks/use-initiative";
 import { StatusBadge, InfoCard, Badge } from "@/components/ui";
 
 export default function InitiativeDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const id = params.id as string;
+  const id = Number(params.id);
 
   const {
     data: initiative,

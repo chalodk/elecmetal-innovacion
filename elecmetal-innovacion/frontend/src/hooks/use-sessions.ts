@@ -15,6 +15,7 @@ export function useSessions() {
       const res = await fetchSessions(token);
       return res.data;
     },
+    staleTime: 10 * 1000,
   });
 }
 

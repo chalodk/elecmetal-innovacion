@@ -1,5 +1,5 @@
 import type { Initiative } from "@/lib/types";
-import InitiativeStatusBadge from "./initiative-status-badge";
+import StatusBadge from "@/components/ui/StatusBadge";
 
 interface Props {
   initiative: Initiative;
@@ -48,7 +48,7 @@ export default function InitiativeCard({ initiative, onClick }: Props) {
             {formatDate(initiative.postulation_date)}
           </p>
         </div>
-        <InitiativeStatusBadge status={initiative.status} />
+        <StatusBadge status={initiative.status} />
       </div>
     </button>
   );

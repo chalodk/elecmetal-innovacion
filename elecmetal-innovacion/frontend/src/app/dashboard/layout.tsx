@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import Link from "next/link";
-import { signOut } from "./actions";
-import SessionsNav from "@/components/SessionsNav";
+import { Suspense } from "react";
+import Sidebar from "@/components/layout/sidebar";
+import { fetchMe } from "@/lib/api";
 
 export default async function DashboardLayout({
   children,
@@ -9,46 +9,50 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  // Obtener rol desde el backend para el Sidebar (role-gating)
+  let role: string | null = null;
+  if (session?.access_token) {
+    try {
+      const profile = await fetchMe(session.access_token);
+      role = profile.role;
+    } catch {
+      // Backend no disponible — sidebar sin link admin
+    }
+  }
 
   return (
     <div className="flex min-h-screen">
-      <aside className="w-64 border-r bg-white p-4 flex flex-col">
-        <div className="text-lg font-bold text-gray-900 mb-6">
-          Elecmetal
-        </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto">
-          <Link
-            href="/dashboard"
-            className="block rounded px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            Inicio
-          </Link>
-
-          {/* Clara + Analista sessions — React Query powered */}
-          <SessionsNav />
-        </nav>
-
-        {/* Admin link for directora */}
-        <div className="pt-3 border-t">
-          <Link
-            href="/dashboard/admin"
-            className="block rounded px-3 py-2 text-xs text-gray-500 hover:bg-gray-100"
-          >
-            Panel Directora
-          </Link>
-        </div>
-
-        <div className="pt-3 border-t">
-          <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-          <form action={signOut}>
-            <button className="mt-2 text-xs text-red-600 hover:underline">
-              Cerrar sesion
-            </button>
-          </form>
-        </div>
-      </aside>
-      <main className="flex-1 bg-gray-50 flex flex-col">{children}</main>
+      <Suspense
+        fallback={
+          <aside className="flex w-64 flex-col border-r bg-white">
+            <div className="flex items-center justify-between px-4 pt-4 pb-2">
+              <div className="h-6 w-24 animate-pulse rounded bg-gray-200" />
+            </div>
+            <div className="flex-1 px-3">
+              <div className="mb-2 h-3 w-16 animate-pulse rounded bg-gray-100" />
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="mb-2 animate-pulse rounded-lg bg-gray-100 px-3 py-3"
+                >
+                  <div className="h-3 w-16 rounded bg-gray-200" />
+                  <div className="mt-2 h-2.5 w-24 rounded bg-gray-200" />
+                </div>
+              ))}
+            </div>
+          </aside>
+        }
+      >
+        <Sidebar user={{ email: user?.email ?? null, role }} />
+      </Suspense>
+      <main className="flex-1 bg-gray-50">{children}</main>
     </div>
   );
 }

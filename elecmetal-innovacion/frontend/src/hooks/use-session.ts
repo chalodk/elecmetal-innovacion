@@ -5,14 +5,14 @@ import { fetchSession } from "@/lib/api";
 import { getAccessToken } from "@/lib/get-token";
 import type { Session } from "@/lib/types";
 
-export const SESSION_KEY = (id: number) => ["session", id] as const;
+export const SESSION_KEY = (id: number | string) => ["session", id] as const;
 
-export function useSession(id: number) {
+export function useSession(id: number | string) {
   return useQuery<Session>({
     queryKey: SESSION_KEY(id),
     queryFn: async () => {
       const token = await getAccessToken();
-      return fetchSession(token, id);
+      return fetchSession(token, Number(id));
     },
     enabled: !!id,
   });

@@ -14,5 +14,6 @@ export function useProfile() {
       const token = await getAccessToken();
       return fetchMe(token);
     },
+    staleTime: 5 * 60 * 1000,
   });
 }

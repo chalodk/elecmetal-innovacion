@@ -8,6 +8,12 @@ import { createSSEStream } from "@/lib/sse-client";
 import { MESSAGES_KEY } from "@/hooks/use-messages";
 import type { Message } from "@/lib/types";
 
+interface InitiativeInfo {
+  initiative_id: number;
+  initiative_code: string;
+  status: string;
+}
+
 interface UseChatStreamReturn {
   /** Contenido del mensaje del asistente en construcción */
   streamingMessage: string | null;
@@ -15,6 +21,8 @@ interface UseChatStreamReturn {
   isStreaming: boolean;
   /** Mensaje de error si el stream falló */
   streamError: string | null;
+  /** Info de iniciativa si se detectó DBI durante el stream */
+  initiativeInfo: InitiativeInfo | null;
   /** Envía un mensaje e inicia el stream */
   send: (content: string) => Promise<void>;
   /** Cancela el stream activo */
@@ -32,10 +40,12 @@ function nextOptimisticId(): number {
   return optimisticIdCounter--;
 }
 
-export function useChatStream(sessionId: number): UseChatStreamReturn {
+export function useChatStream(rawSessionId: number | string): UseChatStreamReturn {
+  const sessionId = Number(rawSessionId);
   const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [initiativeInfo, setInitiativeInfo] = useState<InitiativeInfo | null>(null);
 
   const queryClient = useQueryClient();
   const abortRef = useRef<(() => void) | null>(null);
@@ -52,6 +62,7 @@ export function useChatStream(sessionId: number): UseChatStreamReturn {
     setIsStreaming(false);
     setStreamingMessage(null);
     setStreamError(null);
+    setInitiativeInfo(null);
   }, []);
 
   const startStream = useCallback(
@@ -104,8 +115,10 @@ export function useChatStream(sessionId: number): UseChatStreamReturn {
         setStreamingMessage(null);
 
         // Refetch en segundo plano para sincronizar con el backend
-        // (cuando A2 esté listo, el backend tendrá el mensaje real)
         queryClient.invalidateQueries({ queryKey: MESSAGES_KEY(sessionId) });
+        // Invalidar también initiatives y sessions (DBI pudo haberse creado)
+        queryClient.invalidateQueries({ queryKey: ["initiatives"] });
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
       } catch (err: unknown) {
         if (err instanceof Error && err.name === "AbortError") {
           setIsStreaming(false);
@@ -149,6 +162,7 @@ export function useChatStream(sessionId: number): UseChatStreamReturn {
       retryCountRef.current = 0;
       setStreamingMessage(null);
       setStreamError(null);
+      setInitiativeInfo(null);
 
       // Agregar el user_message al cache optimistamente (inmediato)
       const optimisticId = nextOptimisticId();
@@ -207,6 +221,7 @@ export function useChatStream(sessionId: number): UseChatStreamReturn {
     streamingMessage,
     isStreaming,
     streamError,
+    initiativeInfo,
     send,
     cancelStream,
     retryStream,

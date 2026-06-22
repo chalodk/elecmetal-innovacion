@@ -6,14 +6,14 @@
  */
 
 const STATUS_COLORS: Record<string, string> = {
-  // Initiatives
+  // Initiatives (colores mergeados Jorge + Diego)
+  dbi_generado: "bg-gray-100 text-gray-700",
   persistido: "bg-gray-100 text-gray-700",
   notificado: "bg-blue-100 text-blue-700",
-  en_evaluacion: "bg-yellow-100 text-yellow-700",
-  evaluado: "bg-purple-100 text-purple-700",
-  validado: "bg-green-100 text-green-700",
-  veredicto: "bg-emerald-100 text-emerald-700",
-  dbi_generado: "bg-slate-100 text-slate-600",
+  en_evaluacion: "bg-orange-100 text-orange-700",
+  evaluado: "bg-amber-100 text-amber-700",
+  validado: "bg-amber-100 text-amber-700",
+  veredicto: "bg-green-100 text-green-700",
   // Sessions
   active: "bg-green-100 text-green-700",
   completed: "bg-gray-100 text-gray-600",
@@ -31,13 +31,13 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
+  dbi_generado: "DBI Generado",
   persistido: "Persistido",
   notificado: "Notificado",
-  en_evaluacion: "En evaluacion",
+  en_evaluacion: "En Evaluación",
   evaluado: "Evaluado",
   validado: "Validado",
   veredicto: "Veredicto",
-  dbi_generado: "DBI generado",
   active: "Activo",
   completed: "Completado",
   abandoned: "Abandonado",
