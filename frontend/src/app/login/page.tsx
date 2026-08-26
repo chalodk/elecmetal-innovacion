@@ -1,11 +1,13 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { isAuthBypass } from "@/lib/supabase/mock";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
+  const bypass = isAuthBypass();
 
   const handleGoogleLogin = async () => {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
@@ -29,6 +31,14 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {bypass ? (
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+          >
+            Entrar sin credenciales (modo desarrollo)
+          </button>
+        ) : (
         <button
           onClick={handleGoogleLogin}
           className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
@@ -53,6 +63,7 @@ export default function LoginPage() {
           </svg>
           Ingresar con Google
         </button>
+        )}
 
         <p className="text-center text-xs text-gray-500">
           Proyecto desarrollado para Elecmetal

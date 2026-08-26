@@ -1,7 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isAuthBypass } from "./mock";
 
 export async function updateSession(request: NextRequest) {
+  // Sin Supabase configurado: dejar pasar todo (usuario simulado).
+  if (isAuthBypass()) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
