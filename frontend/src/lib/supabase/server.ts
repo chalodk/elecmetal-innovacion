@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createMockClient, isAuthBypass } from "./mock";
 
 export async function createClient() {
+  if (isAuthBypass()) return createMockClient();
+
   const cookieStore = await cookies();
 
   return createServerClient(
